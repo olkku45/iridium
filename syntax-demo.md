@@ -10,20 +10,20 @@ I will elaborate on this further on in the document. In iridium, you use the sam
  
 
 ## Comments
-
-// this is a comment in iridium
+```
+// this is a comment in iridium  
 // you don't need a semicolon at the end of a comment
-
+```
 ## Declaring variables
-
+```
 int a = 3;
 str b = "My name goes here";
 bool c = True;
 float variable_name = 3.14;
 arr e = [0,1,1,2,3,5];
-
+```
 ## Conditionals
-
+```
 if i_am_human = True {
 	// something here
 }	
@@ -43,9 +43,9 @@ elif i_am_a_dog {
 else {
 	// something
 }
-
+```
 ## Functions
-
+```
 func example_function {
 	int number = 42;
 	
@@ -57,4 +57,6 @@ func example_function {
 		print("This must not be true!")
 	}
 }
+```
 
+## 
