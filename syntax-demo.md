@@ -4,7 +4,8 @@ Let's get some general things out of the way first. In iridium, we have a main f
 You have to end every line of code with a semicolon, like in C, and unlike with Python, for example, where you don't have to do so. 
 Things like functions and loops go inside of curly brackets, instead of using a colon, like in Python. If you want to declare a single character,
 you do that by declaring a string (str). We don't have pointers in iridium or any memory management. Iridium is a dynamically typed language as well.
-Indentation does matter in iridium, like in Python, but not as strictly. For example, you need to indent everything inside curly brackets by one tab.
+Indentation does matter in iridium, like in Python, but not as strictly. For example, you need to indent everything inside curly brackets by one tab. 
+(You can also do two spaces. In this document everything is indented like that.)
 I will elaborate on this further on in the document. In iridium, you use the same comparison operators as in Python.
  And also, I'll update this document as I develop the language further. I'll have a list of keywords that cannot be used as names for variables etc. at the bottom.
  
@@ -46,7 +47,7 @@ else {
 ```
 ## Functions
 ```
-func example_function {
+func example_function() {
   int number = 42;
 	
   if number == 42 {
@@ -58,5 +59,12 @@ func example_function {
   }
 }
 ```
-
-## q
+## Expressions 
+```
+a = 5 + 4
+b = 23 - 32
+c = 44 * 33
+d = 65 / 5
+```
+## Loops 
+coming soon...
