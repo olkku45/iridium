@@ -25,38 +25,38 @@ arr e = [0,1,1,2,3,5];
 ## Conditionals
 ```
 if i_am_human = True {
-	// something here
+  // something here
 }	
 
 if i_am_human {
-	// this is the same thing as above
+  // this is the same thing as above
 }
 
 if i_am_human = False {
-	// something
+  // something
 }
 
 elif i_am_a_dog {
-	// something
+  // something
 }
 
 else {
-	// something
+  // something
 }
 ```
 ## Functions
 ```
 func example_function {
-	int number = 42;
+  int number = 42;
 	
-	if number == 42 {
-		print("This is everything!")
-	}
+  if number == 42 {
+    print("This is everything!");
+  }
 	
-	else {
-		print("This must not be true!")
-	}
+  else {
+    print("This must not be true!");
+  }
 }
 ```
 
-## 
+## q
