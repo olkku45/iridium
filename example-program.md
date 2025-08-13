@@ -1,3 +1,4 @@
+```
 // my lang example
 
 // these would be built-in, not in libraries
@@ -106,3 +107,4 @@ fn main() {
 		}
     }
 }
+```
