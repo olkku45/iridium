@@ -123,10 +123,28 @@ fn main() {
 // convenience method: for instance, if you need to get a specific entity's transform,
 // you'd use .get(index), returns a struct
 
-// libraries for day 1 release:
-// more game dev/sim math operations, string handling, file I/O, asset loading, 
-// input handling, rendering bindings, audio,  profiling, ecs, networking, 
-// miscellaneous dx stuff, allocator utils, more collections (maybe built-in)
+/*
+'comptime' syntax if something will be run at compile time
+
+comptime block: 
+comptime {
+    const variable_thing1: i32 = 43446;
+	const variable_thing2: i32 = 43447;
+}
+
+comptime keyword:
+comptime const thingy: f32 = 3.14159;
+comptime fn example_func(num: i32): i32 {
+    // something
+}
+*/
+
+/*
+libraries for day 1 release:
+more game dev/sim math operations, string handling, file I/O, asset loading, 
+input handling, rendering bindings, audio,  profiling, ecs, networking, 
+miscellaneous dx stuff, allocator utils, more collections (maybe built-in)
+*/
 
 // also zero-cost interop with C should be done
 ```
