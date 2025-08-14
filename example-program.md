@@ -47,6 +47,7 @@ allocator fn spawn_entity(world: &GameWorld, pos: vec3): u32 {
 
 // SIMD operations default for array += another_array type operations
 // regular CPU instructions for scalar operations
+// compiler would infer which to use when
 fn update_physics(positions: []vec3, velocities: []vec3, dt: f32) {
     positions += velocities * dt;
 }
@@ -104,6 +105,7 @@ fn main() {
         update_transforms(&world, dt);
         
 		// static analysis can verify no allocations in hot loop
+		// otherwise throws a compile-time error
 		assert: no_alloc {
         update_physics(world.transforms.positions, world.velocities, dt);
 		}
