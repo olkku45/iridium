@@ -1,20 +1,18 @@
 ```
-// my lang example
+// Iridium example
 
-// these would be built-in, not in libraries
-// use std::arena;
-// use math::{Vec3, Quat};
+// changed pointer syntax to be simpler, compiler infers mutability
 
-// Data-oriented struct - SoA by default
-// mark as parallel-safe
-psafe struct TransformSystem {
+// SoA
+// no marking as parallel-safe anymore
+struct TransformSystem {
     positions: []vec3,
     rotations: []quat,
     scales: []vec3
 }
 
 // AoS
-aos struct Entity {
+struct Entity {
     id: u32,
     active: bool,
     transform_index: u32
@@ -28,7 +26,7 @@ struct GameWorld {
 }
 
 // mark functions that allocate
-alloc fn spawn_entity(world: *mut GameWorld, pos: vec3): u32 {
+allocator fn spawn_entity(world: &GameWorld, pos: vec3): u32 {
     const id = world.entities.len();
     
     // arena allocation
@@ -47,22 +45,25 @@ alloc fn spawn_entity(world: *mut GameWorld, pos: vec3): u32 {
     return id;
 }
 
-// SIMD operations built-in
-simd fn update_physics(positions: []vec3, velocities: []vec3, dt: f32) {
+// SIMD operations default for array += another_array type operations
+// regular CPU instructions for scalar operations
+fn update_physics(positions: []vec3, velocities: []vec3, dt: f32) {
     positions += velocities * dt;
 }
 
 // parallel iteration with safety guarantees
-fn update_transforms(world: *mut GameWorld, dt: f32) {
+fn update_transforms(world: &GameWorld, dt: f32) {
     // safe to disjoint arrays
     parallel for (pos, vel) in zip(world.transforms.positions, world.velocities) {
         *pos += *vel * dt;
     }
     
-    // safe: psafe annotation + same indices
+    // safe: same indices
+	// also possible to do strict_parallel for (...) to guarantee parallel safety
+	// also a --strict-parallel compile-time flag would be available
     parallel for (i in 0..world.transforms.positions.len()) {
-        const pos = &mut world.transforms.positions[i];
-        const rot = &mut world.transforms.rotations[i];
+        const pos = &world.transforms.positions[i];
+        const rot = &world.transforms.rotations[i];
 		
         // possible to select .x/y/z if type=vec3 for example
         *rot = rot.slerp(quat.identity(), dt * 0.1);
@@ -73,6 +74,7 @@ fn update_transforms(world: *mut GameWorld, dt: f32) {
 
 fn main() {
     var game_arena = arena.alloc(1024 * 1024); // 1MB arena
+	// defer ensures cleanup when current scope exits
     defer game_arena.clear();
     
     var world = GameWorld{
@@ -107,4 +109,11 @@ fn main() {
 		}
     }
 }
+
+// convenience method: for instance, if you need to get a specific entity's transform,
+// you'd use .get(index), returns a struct
+
+// libraries for day 1 release:
+// more game dev/sim math operations, string handling, file I/O, asset loading, input handling, rendering/graphics, audio, 
+// profiling, ecs, networking, miscellaneous dx stuff, allocator utils, more collections (maybe built-in)
 ```
