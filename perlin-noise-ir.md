@@ -73,8 +73,11 @@ allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_
 }
 
 allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
-    var dot_products: []f32;
-	dot_products = alloc_arena(4 * vec2.size);
+    var dot_products_list: []f32;
+	// alternate syntax for when we need to allocate memory for a list/array, that would 
+	// store the result of a parallel iteration loop (only an example; it can be used generally),
+	// this way we don't have to initialize the variable.
+	alloc_arena(4 * vec2.size) to dot_products_list;
 	
 	// old version:
 	/*
@@ -87,15 +90,17 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	// new 'lower level' version:
 	assert(unit_vectors.len == ctp_vectors.len);
 	
-	parallel for (i: usize = 0; i < unit_vectors.len; i++) {
+	// with parallel iteration, we need to assign the result to a variable, then local return
+	// from each iteration. these local returns get batched up into dot_products here.
+	dot_products_list = parallel for (i: usize = 0; i < unit_vectors.len; i++) {
 	    var unit_vector: vec2 = unit_vectors[i];
 		var ctp_vector: vec2 = ctp_vectors[ı];
 			
 		var dot: f32 = Math.dot(unit_vector, ctp_vector);
-		dot_products.insert(dot, mode="thread");
+		local return dot;
 	}
 	
-	warn.bound { return dot_products };
+	warn.bound { return dot_products_list };
 }
 
 fn easing_func(x) {
@@ -133,15 +138,27 @@ fn perlin_noise() {
 	var noise: [HEIGHT, WIDTH]f32;
 	noise = alloc(HEIGHT * WIDTH * f32.size);
 	
-	parallel for ((cell_x, cell_y) in grid) {
+	/*
+    '@-marking' not needed in this case, but here just to show it exists
+	also just showing that you can do parallel iteration in batches
+	for batches, you could also specify 'modes', like 'adaptive', where 
+	batch size is selected based on processing time
+	also 'min' batch marking: 'min: 100' and 'size: 1000' for instance.
+	with this, the batches are of size 1000, but with less than 100 ('min' param) items left, 
+	these 'leftovers' get put into the last batch, like so: 
+	2070 items, batch(size: 1000, min: 100) -> [1000, 1070], if you need this kind
+	of behavior.
+	*/
+	
+	@outer noise_values = parallel for ((cell_x, cell_y) in grid, batch(size: 100)) {
 	    if (cell_x == SIZE - 1 || cell_y == SIZE) {
 		    continue;
 		}
 		const corners = locate_corners(cell_x, cell_y);
 		const chosen_unit_vectors = choose_unit_vectors(corners, unit_vectors);
 		
-		parallel for (i: usize = 0; i < CELL_PIXELS; i++) {
-		    parallel for (j: usize = 0; i < CELL_PIXELS; j++) {
+		for (i: usize = 0; i < CELL_PIXELS; i++) {
+		    for (j: usize = 0; i < CELL_PIXELS; j++) {
 				const x = cell_x + i / CELL_PIXELS;
 				const y = cell_y + j / CELL_PIXELS;
 				
@@ -152,14 +169,21 @@ fn perlin_noise() {
 				
 				const y_idx: i32 = (y * CELL_PIXELS) as i32;
 				const x_idx: i32 = (x * CELL_PIXELS) as i32;
-				// formula for converting 2D to 1D: y * width * x, use if we have
-				// var noise: []f32 -declaration instead
-				// noise[y_idx + WIDTH + x_idx] = noise_value;
+				
+				// properly working version (you have to 'carry' the value out, in the case that you have
+				// multiple nested parallel loops):
+				// local return noise[y_idx, x_idx];
+				// don't return here though, you'd just stop at the first inner loop :)
+				
 				// alternatively:
-				noise[y_idx, x_idx] = noise_value;
+				// @outer local return noise[y_idx, x_idx];
+				// good for multiple nested parallel loops (when and if you have them)
 			}
 		}
+		local return noise[y_idx, x_idx];
 	}
+	
+    noise.insert(noise_values);
 		
 	const min_val: f32 = Math.min(noise);
 	const max_val: f32 = Math.max(noise);
