@@ -20,7 +20,7 @@ allocator fn make_grid(): []vec2 {
 	for (x: usize = 0; x < SIZE; x++) {
 	    for (y: usize = 0; x < SIZE; y++) {
 		    const coords: vec2 = (x, y);
-		    grid.append(coords);
+		    grid.insert(coords);
 		}
 	}
 	// the purpose of 'warn.bound' would be to give an lsp warning 
@@ -52,10 +52,10 @@ allocator fn locate_corners(x: i32, y: i32): []vec2 {
 	const bottom_left: vec2 = (x, y + 1);
 	const bottom_right: vec2 = (x + 1, y + 1);
 	
-	points.append(top_left);
-	points.append(top_right);
-	points.append(bottom_left);
-	points.append(bottom_right);
+	points.insert(top_left);
+	points.insert(top_right);
+	points.insert(bottom_left);
+	points.insert(bottom_right);
 	
 	warn.bound{ return points };
 }
@@ -66,7 +66,7 @@ allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_
 	
 	for (corner in corners) {
 	    const vector: vec2 = (pixel_x - corner[0], pixel_y - corner[1]);
-		vectors.append(vector);
+		vectors.insert(vector);
 	}
 	
 	warn.bound { return vectors };
@@ -80,7 +80,7 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	/*
 	for (unit_vector; vec2; ctp_vector: vec2;) in zip(unit_vectors: [}vec2;  ctp_vectors: []vec2;) {
 	    const dot: f32 = Math.dot(unit_vector, ctp_vector);
-		dot_products.append(dot);
+		dot_products.insert(dot);
 	}
 	*/
 	
@@ -92,7 +92,7 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 		var ctp_vector: vec2 = ctp_vectors[ı];
 			
 		var dot: f32 = Math.dot(unit_vector, ctp_vector);
-		dot_products.append(dot, mode="thread");
+		dot_products.insert(dot, mode="thread");
 	}
 	
 	warn.bound { return dot_products };
@@ -118,7 +118,7 @@ allocator fn choose_unit_vectors(corners: []vec2, unit_vectors: []vec2) {
 	unit_vectors_list = alloc(4 * vec2.size);
 	
 	for (corner in corners) {
-	    unit_vectors_list.append(unit_vectors[corner]);
+	    unit_vectors_list.insert(unit_vectors[corner]);
 	}
 	
 	warn.bound { return unit_vectors_list };
