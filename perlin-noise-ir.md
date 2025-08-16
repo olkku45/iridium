@@ -77,7 +77,8 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	// alternate syntax for when we need to allocate memory for a list/array, that would 
 	// store the result of a parallel iteration loop (only an example; it can be used generally),
 	// this way we don't have to initialize the variable.
-	alloc_arena(4 * vec2.size) to dot_products_list;
+	const mem = alloc_arena(4 * vec2.size);
+	dot_products_list.reserve(mem);
 	
 	// old version:
 	/*
