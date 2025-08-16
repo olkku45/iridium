@@ -3,18 +3,25 @@
 ## Math functions
 
 Math::sin(x)
+
 Math::cos(x)
+
 Math::tan(x)
 
 Math::asin(x)
+
 Math::acos(x)
+
 Math::atan(x)
+
 Math::atan2(x)
 
 Math::exp(x)
+
 Math::log(x, base)
 
 Math::pi
+
 Math::e
 
 ### Math::Matrix
@@ -40,16 +47,23 @@ Matrix::det(x)
 ## Random-functions
 
 Random::choice(sequence)
+
 Random::norm()
+
 Random::uniform(a, b)
+
 Random::randint(a, b)
+
 Random::randrange(start, stop, step)
 
 ## Collections
 
 HashMap
+
 Deque
+
 Stack
+
 LinkedList
 
 ## Warn - compiler warnings
