@@ -29,9 +29,9 @@ allocator fn make_grid(): []vec2 {
 }
 
 allocator fn get_unit_vectors(grid: []vec2): HashMap {
-    const grid_size = sizeof(grid)
+    const grid_size = grid.size;
 	
-	const  vec_mem = alloc_thread(4 * grid.len());
+	const  vec_mem = alloc_thread(4 * grid.len);
 	var vectors = HashMap<vec2, vec2>(use=vec_mem);
 	
 	for (coordinates in grid) {
@@ -45,7 +45,7 @@ allocator fn get_unit_vectors(grid: []vec2): HashMap {
 
 allocator fn locate_corners(x: i32, y: i32): []vec2 {
     var points: []vec2;
-	points = alloc_pool(4 * vec2.size());
+	points = alloc_pool(4 * vec2.size);
 	
 	const top_left: vec2 = (x, y);
 	const top_right: vec2 = (x + 1, y);
@@ -62,7 +62,7 @@ allocator fn locate_corners(x: i32, y: i32): []vec2 {
 
 allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_y: f32) {
     var vectors: []vec2;
-	vectors = alloc_arena(4 * vec2.size());
+	vectors = alloc_arena(4 * vec2.size);
 	
 	for (corner in corners) {
 	    const vector: vec2 = (pixel_x - corner[0], pixel_y - corner[1]);
@@ -74,7 +74,7 @@ allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_
 
 allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
     var dot_products: []f32;
-	dot_products = alloc_arena(4 * vec2.size());
+	dot_products = alloc_arena(4 * vec2.size);
 	
 	// old version:
 	/*
@@ -85,9 +85,9 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	*/
 	
 	// new 'lower level' version:
-	assert(unit_vectors.len() == ctp_vectors.len());
+	assert(unit_vectors.len == ctp_vectors.len);
 	
-	parallel for (i: usize = 0; i < unit_vectors.len(); i++) {
+	parallel for (i: usize = 0; i < unit_vectors.len; i++) {
 	    var unit_vector: vec2 = unit_vectors[i];
 		var ctp_vector: vec2 = ctp_vectors[ı];
 			
@@ -115,9 +115,9 @@ fn interpolate(dot_products: []f32, pixel_x: f32, pixel_y: f32, cell_x: i32, cel
 
 allocator fn choose_unit_vectors(corners: []vec2, unit_vectors: []vec2) {
     var unit_vectors_list: []vec2;
-	unit_vectors_list = alloc(4 * vec2.size());
+	unit_vectors_list = alloc(4 * vec2.size);
 	
-	for (corner: vec2; in corners: [}vec2;) {
+	for (corner in corners) {
 	    unit_vectors_list.append(unit_vectors[corner]);
 	}
 	
@@ -131,7 +131,7 @@ fn perlin_noise() {
 	// technically you could do an unlimited amount of dimensions
 	// with this syntax, but the compiler will be optimized for < 5.
 	var noise: [HEIGHT, WIDTH]f32;
-	noise = alloc(HEIGHT * WIDTH * f32.size());
+	noise = alloc(HEIGHT * WIDTH * f32.size);
 	
 	parallel for ((cell_x, cell_y) in grid) {
 	    if (cell_x == SIZE - 1 || cell_y == SIZE) {
