@@ -6,6 +6,7 @@ include::std::Random;
 include::std::Math;
 include::std::Collections::HashMap;
 include::std::Render;
+include::std::Warn;
 
 comptime const SIZE = 10;
 comptime const CELL_PIXELS = 4;
@@ -20,56 +21,56 @@ allocator fn make_grid(): []vec2 {
 	for (x: usize = 0; x < SIZE; x++) {
 	    for (y: usize = 0; x < SIZE; y++) {
 		    const coords: vec2 = (x, y);
-		    grid.insert(coords);
+		    insert(grid: coords);
 		}
 	}
 	// the purpose of 'warn.bound' would be to give an lsp warning 
 	// that the memory allocated for the return value wasn't freed
-	warn.bound { return grid };
+	Warn::bound { return grid };
 }
 
 allocator fn get_unit_vectors(grid: []vec2): HashMap {
-    const grid_size = grid.size;
+    const grid_size = sizeof(grid);
 	
 	const  vec_mem = alloc_thread(4 * grid.len);
 	var vectors = HashMap<vec2, vec2>(use=vec_mem);
 	
 	for (coordinates in grid) {
-	    const angle = Random.uniform(0, 2*Math.pi);
-		const vector: vec2 = (Math.cos(angle), Math.sin(angle));
+	    const angle = Random::uniform(0, 2*Math::pi);
+		const vector: vec2 = (Math::cos(angle), Math::sin(angle));
 		vectors[coordinates] = vector;
 	}
 		
-	warn.bound { return vectors };
+	Warn::bound { return vectors };
 }
 
 allocator fn locate_corners(x: i32, y: i32): []vec2 {
     var points: []vec2;
-	points = alloc_pool(4 * vec2.size);
+	points = alloc_pool(4 * sizeof(vec2));
 	
 	const top_left: vec2 = (x, y);
 	const top_right: vec2 = (x + 1, y);
 	const bottom_left: vec2 = (x, y + 1);
 	const bottom_right: vec2 = (x + 1, y + 1);
 	
-	points.insert(top_left);
-	points.insert(top_right);
-	points.insert(bottom_left);
-	points.insert(bottom_right);
+	insert(points: top_left);
+	insert(points: top_right);
+	insert(points: bottom_left);
+	insert(points: bottom_right);
 	
-	warn.bound{ return points };
+	Warn::bound{ return points };
 }
 
 allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_y: f32) {
     var vectors: []vec2;
-	vectors = alloc_arena(4 * vec2.size);
+	vectors = alloc_arena(4 * sizeof(vec2));
 	
 	for (corner in corners) {
 	    const vector: vec2 = (pixel_x - corner[0], pixel_y - corner[1]);
-		vectors.insert(vector);
+		insert(vectors: vector);
 	}
 	
-	warn.bound { return vectors };
+	Warn::bound { return vectors };
 }
 
 allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
@@ -77,8 +78,11 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	// alternate syntax for when we need to allocate memory for a list/array, that would 
 	// store the result of a parallel iteration loop (only an example; it can be used generally),
 	// this way we don't have to initialize the variable.
-	const mem = alloc_arena(4 * vec2.size);
-	dot_products_list.reserve(mem);
+	const mem = alloc_arena(4 * sizeof(vec2));
+	reserve(dot_products_list: mem);
+	
+	// alternatively:
+	// reserve(dot_products_list: alloc_arena(4 * sizeof(vec2)));
 	
 	// old version:
 	/*
@@ -89,19 +93,19 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	*/
 	
 	// new 'lower level' version:
-	assert(unit_vectors.len == ctp_vectors.len);
+	assert(sizeof(unit_vectors) == sizeof(ctp_vectors));
 	
 	// with parallel iteration, we need to assign the result to a variable, then local return
 	// from each iteration. these local returns get batched up into dot_products here.
-	dot_products_list = parallel for (i: usize = 0; i < unit_vectors.len; i++) {
+	dot_products_list = parallel for (i: usize = 0; i < sizeof(unit_vectors); i++) {
 	    var unit_vector: vec2 = unit_vectors[i];
 		var ctp_vector: vec2 = ctp_vectors[ı];
 			
-		var dot: f32 = Math.dot(unit_vector, ctp_vector);
+		var dot: f32 = Math::dot(unit_vector, ctp_vector);
 		local return dot;
 	}
 	
-	warn.bound { return dot_products_list };
+	Warn::bound { return dot_products_list };
 }
 
 fn easing_func(x) {
@@ -121,13 +125,13 @@ fn interpolate(dot_products: []f32, pixel_x: f32, pixel_y: f32, cell_x: i32, cel
 
 allocator fn choose_unit_vectors(corners: []vec2, unit_vectors: []vec2) {
     var unit_vectors_list: []vec2;
-	unit_vectors_list = alloc(4 * vec2.size);
+	unit_vectors_list = alloc(4 * sizeof(vec2));
 	
 	for (corner in corners) {
-	    unit_vectors_list.insert(unit_vectors[corner]);
+	    insert(unit_vectors_list: unit_vectors[corner]);
 	}
 	
-	warn.bound { return unit_vectors_list };
+	Warn::bound { return unit_vectors_list };
 }
 
 fn perlin_noise() {
@@ -137,7 +141,7 @@ fn perlin_noise() {
 	// technically you could do an unlimited amount of dimensions
 	// with this syntax, but the compiler will be optimized for < 5.
 	var noise: [HEIGHT, WIDTH]f32;
-	noise = alloc(HEIGHT * WIDTH * f32.size);
+	noise = alloc(HEIGHT * WIDTH * sizeof(f32));
 	
 	/*
     '@-marking' not needed in this case, but here just to show it exists
@@ -184,10 +188,10 @@ fn perlin_noise() {
 		local return noise[y_idx, x_idx];
 	}
 	
-    noise.insert(noise_values);
-		
-	const min_val: f32 = Math.min(noise);
-	const max_val: f32 = Math.max(noise);
+    insert(noise: noise_values);
+	
+	const min_val: f32 = Math::min(noise);
+	const max_val: f32 = Math::max(noise);
 	
 	noise = (noise - min_val) / (max_val - min_val) * 255;
 	
@@ -211,14 +215,14 @@ fn perlin_noise() {
 	free(chosen_unit_vectors);
 	*/
 	
-	warn.bound { return noise };
+	Warn::bound { return noise };
 }
 
 fn main() {
     const noise_map = perlin_noise();
-	const to_render = Render.image(values=noise_map, cmap="gray", cbar="on");
-	const window = Render.window(to_render);
-	Render.open(window);
+	const to_render = Render::image(values=noise_map, cmap="gray", cbar="on");
+	const window = Render::window(to_render);
+	Render::open(window);
 	
 	parallel free(noise_map);
 }
