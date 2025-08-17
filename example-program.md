@@ -1,8 +1,9 @@
 ```
 // Iridium example
-// OUTDATED SYNTAX
 
 // changed pointer syntax to be simpler, compiler infers mutability
+
+include::std::Math;
 
 // SoA
 // no marking as parallel-safe anymore
@@ -28,22 +29,28 @@ struct GameWorld {
 
 // mark functions that allocate
 allocator fn spawn_entity(world: &GameWorld, pos: vec3): u32 {
-    const id = world.entities.len();
+    const id = lengthof(world.entities);
     
-    // arena allocation, using push instead of append
-    world.entities.push(.{
-        .id = id,
+	// insert-function: append but as a function
+	// could be 'put' as well.
+    // arena allocation, have to free manually
+	insert(world.entities: .{
+	    .id = id,
         .active = true,
-        .transform_index = world.transforms.positions.len()
-    });
+        .transform_index = lengthof(world.transforms.positions)
+	});
     
-    // SoA append
-    world.transforms.positions.push(pos);
-    world.transforms.rotations.push(quat.identity());
-    world.transforms.scales.push(vec3.one());
-    world.velocities.push(vec3.zero());
+    // SoA 'append'
+	insert(world.transforms.positions: pos);
+	insert(world.transforms.positions: quat::identity());
+	insert(world.transforms.scales: vec3::one());
+	insert(world.velocities: vec3::zero());
+	
+	// I imagine the memory was automatically freed at the end of scope before, 
+	// so I just put this here for now at least.
+	free(world.entities);
     
-    return id;
+    Warn::bound { return id };
 }
 
 // SIMD operations default for array += another_array type operations
@@ -59,51 +66,52 @@ fn update_physics(positions: []vec3, velocities: []vec3, dt: f32) {
 fn update_transforms(world: &GameWorld, dt: f32) {
     // safe to disjoint arrays, changed pointer mutation syntax so
 	// references in member ops get auto-deref'd
-    parallel for (pos, vel) in zip(world.transforms.positions, world.velocities) {
-        pos += vel * dt;
-    }
+	// no need for 'local return' here, since we're doing in-place mutations
+	parallel for (i: usize = 0; i < lengthof(world.velocities); i++) {
+		world.transforms.positions[ı] += world.velocities[i] * dt;
+	}
     
     // safe: same indices
 	// also possible to do strict_parallel for (...) to guarantee parallel safety
 	// also a --strict-parallel compile-time flag would be available
-    parallel for (i in 0..world.transforms.positions.len()) {
+    parallel for (i: usize = 0; i < lengthof(world.transforms.positions); i++) {
         const pos = &world.transforms.positions[i];
         const rot = &world.transforms.rotations[i];
 		
         // possible to select .x/y/z if type=vec3 for example
-        rot = rot.slerp(quat.identity(), dt * 0.1);
-        pos.y = math.max(pos.y, 0.0); // clamp
-		// alternative: pos.y = clamp() or pos.y.clamp()
+        rot = Math::slerp(quat::identity(), dt * 0.1);
+        pos.y = Math::max(pos.y, 0.0); // clamp
     }
 }
 
 fn main() {
     // changed to scoped allocation block
 	// also possible: var game_arena = arena.alloc(1024 * 1024); 1MB arena
-    // defer game_arena.clear();
+    // defer game_arenaclear();
 	// defer ensures cleanup when current scope exits
 	
+	// allocation scope or something :D
 	alloc_scope arena(1024 * 1024) as game_arena {
     
 		var world = GameWorld{
-			.entities = array(Entity, game_arena).alloc(),
+			.entities = array(Entity, game_arena)::alloc(),
 			.transforms = TransformSystem{
-				.positions = []vec3.alloc(game_arena),
-				.rotations = []quat.alloc(game_arena),
-				.scales = []vec3.alloc(game_arena)
+			    // crude change for allocating like this without methods
+				.positions = []vec3::alloc(game_arena),
+				.rotations = []quat::alloc(game_arena),
+				.scales = []vec3::alloc(game_arena)
 			},
-			.velocities = []vec3.alloc(game_arena)
+			.velocities = []vec3::alloc(game_arena)
 		};
 		
 		// spawn some entities
-		for (i in 0..1000) {
-		    // changed vec3.new() to vec3()
+		for (i: usize = 0, i <= 1000; i++) {
 			const pos = vec3(
 				i % 32 as f32,
 				0.0,
 				i / 32 as f32
 			);
-			_ = spawn_entity(&world, pos);
+			const entity = spawn_entity(&world, pos);
 		}
 		
 		// Game loop

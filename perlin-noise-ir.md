@@ -72,13 +72,13 @@ allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_
 allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 	var dot_products_list: []f32 = alloc_arena(4 * sizeof(vec2));
 	
-	assert(sizeof(unit_vectors) == sizeof(ctp_vectors));
+	assert(lengthof(unit_vectors) == lengthof(ctp_vectors));
 	
 	// with parallel iteration, we need to assign the result to a variable, then local return
 	// from each iteration. these local returns get batched up into dot_products here.
-	dot_products_list = parallel for (i: usize = 0; i < sizeof(unit_vectors); i++) {
+	dot_products_list = parallel for (i: usize = 0; i < lengthof(unit_vectors); i++) {
 	    var unit_vector: vec2 = unit_vectors[i];
-		var ctp_vector: vec2 = ctp_vectors[ı];
+		var ctp_vector: vec2 = ctp_vectors[i];
 			
 		var dot: f32 = Math::dot(unit_vector, ctp_vector);
 		local return dot;
@@ -132,7 +132,7 @@ fn perlin_noise() {
 	of behavior.
 	*/
 	
-	@outer noise_values = parallel for ((cell_x, cell_y) in grid, batch(size: 100)) {
+	@outer noise = parallel for ((cell_x, cell_y) in grid, batch(size: 100)) {
 	    if (cell_x == SIZE - 1 || cell_y == SIZE) {
 		    continue;
 		}
@@ -152,20 +152,14 @@ fn perlin_noise() {
 				const y_idx: i32 = (y * CELL_PIXELS) as i32;
 				const x_idx: i32 = (x * CELL_PIXELS) as i32;
 				
-				// properly working version (you have to 'carry' the value out, in the case that you have
-				// multiple nested parallel loops):
-				// local return noise[y_idx, x_idx];
-				// don't return here though, you'd just stop at the first inner loop :)
+				noise[y_idx, x_idx] = noise_value;
 				
-				// alternatively:
+				// you can do:
 				// @outer local return noise[y_idx, x_idx];
 				// good for multiple nested parallel loops (when and if you have them)
 			}
 		}
-		local return noise[y_idx, x_idx];
 	}
-	
-    insert(noise: noise_values);
 	
 	const min_val: f32 = Math::min(noise);
 	const max_val: f32 = Math::max(noise);
