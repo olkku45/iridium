@@ -144,12 +144,12 @@ more to come...
 ### String::Packer
 
 Packer::new()
-- initialize new packer using provided memory buffer, 
+- initialize new string packer using provided memory arena, 
 set cursor at 0
 
 Packer::pack()
 - copies bytes of string into packer's buffer at current cursor pos, 
-returns index of packed string
+returns index of packed string. 
 
 Packer::get()
 - retrieves view into buffer for packed string at given index, 

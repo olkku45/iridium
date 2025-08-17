@@ -15,8 +15,7 @@ comptime const HEIGHT = SIZE * CELL_PIXELS;
 comptime const WIDTH = SIZE * CELL_PIXELS;
 
 allocator fn make_grid(): []vec2 {
-	var grid: []vec2;
-    grid = alloc((SIZE+1) * (SIZE+1));
+    var grid: []vec2 = alloc((SIZE+1) * (SIZE+1));
 	
 	for (x: usize = 0; x < SIZE; x++) {
 	    for (y: usize = 0; x < SIZE; y++) {
@@ -30,10 +29,9 @@ allocator fn make_grid(): []vec2 {
 }
 
 allocator fn get_unit_vectors(grid: []vec2): HashMap {
-    const grid_size = sizeof(grid);
-	
-	const  vec_mem = alloc_thread(4 * grid.len);
-	var vectors = HashMap<vec2, vec2>(use=vec_mem);
+	// this is just to showcase that we can allocate thread-locally, 
+	// probably doesn't make practical sense
+	var vectors: HashMap<vec2, vec2> = alloc_thread(4 * lengthof(grid));
 	
 	for (coordinates in grid) {
 	    const angle = Random::uniform(0, 2*Math::pi);
@@ -45,8 +43,7 @@ allocator fn get_unit_vectors(grid: []vec2): HashMap {
 }
 
 allocator fn locate_corners(x: i32, y: i32): []vec2 {
-    var points: []vec2;
-	points = alloc_pool(4 * sizeof(vec2));
+	var points: []vec2 = alloc_pool(4 * sizeof(vec2));
 	
 	const top_left: vec2 = (x, y);
 	const top_right: vec2 = (x + 1, y);
@@ -62,8 +59,7 @@ allocator fn locate_corners(x: i32, y: i32): []vec2 {
 }
 
 allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_y: f32) {
-    var vectors: []vec2;
-	vectors = alloc_arena(4 * sizeof(vec2));
+	var vectors: []vec2 = alloc_arena(4 * sizeof(vec2));
 	
 	for (corner in corners) {
 	    const vector: vec2 = (pixel_x - corner[0], pixel_y - corner[1]);
@@ -74,25 +70,8 @@ allocator fn vectors_from_corners_to_point(corners: []vec2, pixel_x: f32, pixel_
 }
 
 allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
-    var dot_products_list: []f32;
-	// alternate syntax for when we need to allocate memory for a list/array, that would 
-	// store the result of a parallel iteration loop (only an example; it can be used generally),
-	// this way we don't have to initialize the variable.
-	const mem = alloc_arena(4 * sizeof(vec2));
-	reserve(dot_products_list: mem);
+	var dot_products_list: []f32 = alloc_arena(4 * sizeof(vec2));
 	
-	// alternatively:
-	// reserve(dot_products_list: alloc_arena(4 * sizeof(vec2)));
-	
-	// old version:
-	/*
-	for (unit_vector; vec2; ctp_vector: vec2;) in zip(unit_vectors: [}vec2;  ctp_vectors: []vec2;) {
-	    const dot: f32 = Math.dot(unit_vector, ctp_vector);
-		dot_products.insert(dot);
-	}
-	*/
-	
-	// new 'lower level' version:
 	assert(sizeof(unit_vectors) == sizeof(ctp_vectors));
 	
 	// with parallel iteration, we need to assign the result to a variable, then local return
@@ -124,8 +103,7 @@ fn interpolate(dot_products: []f32, pixel_x: f32, pixel_y: f32, cell_x: i32, cel
 }
 
 allocator fn choose_unit_vectors(corners: []vec2, unit_vectors: []vec2) {
-    var unit_vectors_list: []vec2;
-	unit_vectors_list = alloc(4 * sizeof(vec2));
+	var unit_vectors_list: []vec2 = alloc_arena(4 * sizeof(vec2));
 	
 	for (corner in corners) {
 	    insert(unit_vectors_list: unit_vectors[corner]);
@@ -140,8 +118,7 @@ fn perlin_noise() {
 	
 	// technically you could do an unlimited amount of dimensions
 	// with this syntax, but the compiler will be optimized for < 5.
-	var noise: [HEIGHT, WIDTH]f32;
-	noise = alloc(HEIGHT * WIDTH * sizeof(f32));
+	var noise: [HEIGHT, WIDTH]f32 = alloc_arena(HEIGHT * WIDTH * sizeof(f32));
 	
 	/*
     '@-marking' not needed in this case, but here just to show it exists

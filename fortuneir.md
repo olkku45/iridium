@@ -5,6 +5,7 @@
 include::std::Random;
 include::std::File;
 include::std::String;
+include::std::String::Packer;
 include::std::Warn;
 
 allocator fn process_file(): []string {
@@ -13,6 +14,8 @@ allocator fn process_file(): []string {
 
     const buffer: *u8 = alloc(sizeof(quotes));
 
+    // awkward list comprehension here :/
+	// FIXME:
     const without_newline: []string = {
         String::strip(quote, '\n', use=buffer) for quote in quotes
     };
@@ -23,18 +26,15 @@ allocator fn process_file(): []string {
 }
 
 allocator fn get_quotes(file: []string): []string {
-    // potential alternatives:
-    // alloc(file.len() * file.max());
-    // alloc(file.bytesize());
-    const file_memory: *u32 = alloc(sum(lengthof(i) for i in file));
-
     var quotes: []string = [""];
-    const packer = String::packer(file_memory);
+	
+	// I wonder if this should be made into an object :( 
+    Packer::new() = alloc_arena(sum(lengthof(i) for i in file));
 
     const processed = process_file();
 
     for (line in processed) {
-        const packed = packer::next(line);
+        const packed = Packer::next(line);
 
         if (packed != '%') {
             if (quotes[-1]) {

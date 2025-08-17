@@ -123,6 +123,8 @@ fn main() {
 // convenience method: for instance, if you need to get a specific entity's transform,
 // you'd use .get(index), returns a struct
 
+// there would also be pool and thread-local allocators
+
 /*
 'comptime' syntax if something will be run at compile time
 
@@ -145,6 +147,18 @@ more game dev/sim math operations, string handling, file I/O, asset loading,
 input handling, rendering bindings, audio,  profiling, ecs, networking, 
 miscellaneous dx stuff, allocator utils, more collections (maybe built-in)
 */
+
+// package manager "alloy" if we have a package manager
+
+/*
+possible to infer what imported module / library a function is from? like so:
+instead of: 
+include::std::Math;
+Math::sin();
+we have:
+include::std::Math;
+sin()
+*/ 
 
 // also zero-cost interop with C should be done
 ```
