@@ -2,11 +2,12 @@
 // fortune program syntax example translated from python to iridium syntax
 // from https://github.com/olkku45/fortune-python
 
-include::std::Random;
-include::std::File;
-include::std::String;
-include::std::String::Packer;
-include::std::Warn;
+include::std::{
+    Random,
+	File,
+	String::Packer,
+	Warn
+}
 
 allocator fn process_file(): []string {
     const quotes = File::open("quotes.txt", "r");

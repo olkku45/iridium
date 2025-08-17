@@ -2,11 +2,23 @@
 // DISCLAIMER: there are no raw pointers in this demo, but they would be a part of 
 // the language.
 
-include::std::Random;
-include::std::Math;
-include::std::Collections::HashMap;
-include::std::Render;
-include::std::Warn;
+include::std::{
+    Random,
+	Math,
+	Collections::HashMap,
+	Render,
+	Warn
+}
+
+/*
+you could also import like:
+include::std::Math::Matrix:ImportAll;
+and have:
+const identity = mat2::identity();
+thinking about having built in matrices only up to 4D, and then
+a generalized matrix type, giving the dimension count as a parameter:
+const general_type = mat::identity(dim: 5);
+*/
 
 comptime const SIZE = 10;
 comptime const CELL_PIXELS = 4;
@@ -34,7 +46,7 @@ allocator fn get_unit_vectors(grid: []vec2): HashMap {
 	var vectors: HashMap<vec2, vec2> = alloc_thread(4 * lengthof(grid));
 	
 	for (coordinates in grid) {
-	    const angle = Random::uniform(0, 2*Math::pi);
+	    const angle = Random::uniform(start: 0, stop: 2*Math::pi);
 		const vector: vec2 = (Math::cos(angle), Math::sin(angle));
 		vectors[coordinates] = vector;
 	}
@@ -83,6 +95,12 @@ allocator fn compute_dot_products(unit_vectors: []vec2, ctp_vectors: []vec2) {
 		var dot: f32 = Math::dot(unit_vector, ctp_vector);
 		local return dot;
 	}
+	// note about dot products: their parameters would be defined anonymously internally, meaning 
+	// when calling the function, the order and names of the parameters don't need to be specified. 
+	// anonymous parameters would be denoted with an underscore: '_', and you could use them 
+	// yourself in your own functions. you'd have to specify the type though. 
+	// the thing is, you can use either only named or only anonymous 
+	// parameters, to avoid confusion about what parameters go where and so on.
 	
 	Warn::bound { return dot_products_list };
 }
@@ -137,17 +155,17 @@ fn perlin_noise() {
 		    continue;
 		}
 		const corners = locate_corners(cell_x, cell_y);
-		const chosen_unit_vectors = choose_unit_vectors(corners, unit_vectors);
+		const chosen_unit_vectors = choose_unit_vectors(corners: corners, unit_vectors: unit_vectors);
 		
 		for (i: usize = 0; i < CELL_PIXELS; i++) {
 		    for (j: usize = 0; i < CELL_PIXELS; j++) {
 				const x = cell_x + i / CELL_PIXELS;
 				const y = cell_y + j / CELL_PIXELS;
 				
-				const ctp_vectors = vectors_from_corners_to_point(corners, x, y);
-				const dot_products = compute_dot_products(chosen_unit_vectors, ctp_vectors);
+				const ctp_vectors = vectors_from_corners_to_point(corners: corners, pixel_x: x, pixel_y: y);
+				const dot_products = compute_dot_products(unit_vectors: chosen_unit_vectors, ctp_vectors: ctp_vectors);
 				
-				const noise_value = interpolate(dot_products, x, y, cell_x, cell_y);
+				const noise_value = interpolate(dot_products: dot_products, pixel_x: x, pixel: y, cell_x: cell_x, cell_y: cell_y);
 				
 				const y_idx: i32 = (y * CELL_PIXELS) as i32;
 				const x_idx: i32 = (x * CELL_PIXELS) as i32;
@@ -191,7 +209,7 @@ fn perlin_noise() {
 
 fn main() {
     const noise_map = perlin_noise();
-	const to_render = Render::image(values=noise_map, cmap="gray", cbar="on");
+	const to_render = Render::image(values: noise_map, cmap: "gray", cbar: "on");
 	const window = Render::window(to_render);
 	Render::open(window);
 	
