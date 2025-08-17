@@ -1,5 +1,6 @@
 ```
 // Iridium example
+// OUTDATED SYNTAX
 
 // changed pointer syntax to be simpler, compiler infers mutability
 
