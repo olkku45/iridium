@@ -54,8 +54,8 @@ Scoped arena allocation and compile-time evaluation have some effects on each ot
 over it. `comptime` can be used with an `alloc_arena()`-block like this:
 ```
 comptime alloc_arena(1_000) {
-    const thing_one: i32 = alloc(100)
-	const thing_two: i32 = alloc(200);
+    const thing_one: []i32 = alloc(100)
+	const thing_two: []i32 = alloc(200);
 }
 ```
 In this example, the block of code is evaluated at compile time. If we have a `comptime` keyword denoting the entire block, 
@@ -68,15 +68,15 @@ comptime alloc_arena(1_000) {
 Here comes the tricky part. Let's say we have this configuration:
 ```
 alloc_arena(1_000) {
-    comptime const a: i32 = alloc(400);
+    comptime const a: []i32 = alloc(400);
 }
 ```
 Here we have a `comptime` keyword only inside the block. The variable `a` gets evaluated at compile-time, and it doesn't 
 pass the memory budget. But now, let's exceed the memory budget with another variable denoted with `comptime`:
 ```
 alloc_arena(1_000) {
-    comptime const a: i32 = alloc(400);
-	comptime const b: i32 = alloc(700);
+    comptime const a: []i32 = alloc(400);
+	comptime const b: []i32 = alloc(700);
 }
 ```
 Here we get a compile-time error. The compiler lazily checks first if an alloc-call is inside an alloc_arena-block, and if it is, 
@@ -84,8 +84,8 @@ it will count the total memory taken from the given budget. Since both variables
 both, sees that they exceed the allocated budget in total, and returns an error. But now, let's see another scenario:
 ```
 alloc_arena(1_000) {
-    comptime const a: i32 = alloc(400);
-	const b: i32 = alloc(700);
+    comptime const a: []i32 = alloc(400);
+	const b: []i32 = alloc(700);
 }
 ```
 Now `b` doesn't get evaluated at compile-time, rather only when this bit of code runs in the program. And you can probably tell that we 
@@ -94,3 +94,25 @@ at compile-time, but only when the code has run up to this point! The point then
 interact, and take these things into consideration. An easy fix to this situation would be to just evaluate 
 the whole block at compile-time to induce an error automatically, or if you want, you can denote both variables with `comptime` 
 here. The ideal combination to use depends on your development scenario.
+
+## Try and else
+
+You can also use the `try` keyword to check whether what you're trying to allocate is valid to the scope. Let's see an example:
+```
+alloc_arena(1_000) {
+    const thing: []vec2 = try alloc(1_200);
+}
+```
+Here the allocation would just fail, but the program wouldn't throw a runtime error from this. Though there might come an error further on, 
+when you're trying to do something with 'thing'. With the `else` keyword, you can have a fallback:
+```
+alloc_arena(1_000) {
+    const thing: []vec2 = try alloc(1200) else {
+	    alloc(500);
+	}
+}
+```
+So here, the program would go to the else block and allocate 500 bytes to 'thing'. Now, you can have multiple levels of try-else allocation 
+nesting if you want, but ideally, you'd just have one level. It's up to you to program in a smart and concise way. You can also have 
+`comptime` act as a compile-time check, since otherwise, the try-else allocation could result in a runtime error. 
+Also, if the most deeply nested `else` block fails in your program, then it's just a runtime error, unless specified with `comptime`.
