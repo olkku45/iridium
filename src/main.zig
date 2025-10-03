@@ -1,27 +1,43 @@
 const std = @import("std");
-const iridium = @import("iridium");
+const Tokenizer = @import("Tokenizer.zig").Tokenizer;
+
+const print = std.debug.print;
+const printerr = std.log.err;
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try iridium.bufferedPrint();
-}
+    while (true) {
+        var stdin_buffer: [1024]u8 = undefined;
+        var stdout_buffer: [1024]u8 = undefined;
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+        var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+        var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+        const stdin = &stdin_reader.interface;
+        const stdout = &stdout_writer.interface;
+
+        try stdout.writeAll("> ");
+        try stdout.flush();
+
+        const line = try stdin.takeDelimiterExclusive('\n');
+
+        if (line.len == 0) break;
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+        
+        var tokenizer = try Tokenizer.init(allocator, line);
+        defer tokenizer.deinit();
+        
+        var tokens = try tokenizer.getTokens(allocator);
+        defer tokens.deinit(allocator);
+        
+        for (0..tokens.items.len) |i| {
+            try stdout.print("{}\n", .{tokens.items[i]});
+            try stdout.flush();
         }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    }
+}
+
+pub fn reportError(line: i32, where: []const u8, message: []const u8) void {
+    print("[line {d} ] Error {s}: {s}", .{line, where, message});
 }
