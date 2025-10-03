@@ -1,6 +1,8 @@
 const std = @import("std");
 const main = @import("main.zig");
 
+// TODO: tokenisoi primitiiviset tyypit
+
 pub const TokenType = enum {
     LEFT_PAREN,
     RIGHT_PAREN,
@@ -31,7 +33,20 @@ pub const TokenType = enum {
     STAR_EQUAL,
     SLASH_EQUAL,
 
-    NUMBER,
+    UINT8,
+    UINT16,
+    UINT32,
+    UINT64,
+    INT8,
+    INT16,
+    INT32,
+    INT64,
+    FLOAT32,
+    FLOAT64,
+    BOOL,
+    VOID,
+    INTEGER,
+    FLOAT,
     IDENTIFIER,
     STRING,
 
@@ -87,7 +102,8 @@ fn initTokens() std.array_list.Aligned(Token, null) {
 fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     var keywords = std.StringHashMap(TokenType).init(allocator);
 
-    try keywords.put("use", .USE);
+    // greyed out ones will (most likely) be added later
+    // try keywords.put("use", .USE);
     try keywords.put("let", .LET);
     try keywords.put("mut", .MUT);
     try keywords.put("const", .CONST);
@@ -101,20 +117,34 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("union", .UNION);
     try keywords.put("continue", .CONTINUE);
     try keywords.put("BREAK", .BREAK);
-    try keywords.put("match", .MATCH);
+    // try keywords.put("match", .MATCH);
     try keywords.put("if", .IF);
     try keywords.put("else", .ELSE);
-    try keywords.put("std", .STD);
-    try keywords.put("lib", .LIB);
-    try keywords.put("extern", .EXTERN);
+    // try keywords.put("std", .STD);
+    // try keywords.put("lib", .LIB);
+    // try keywords.put("extern", .EXTERN);
     try keywords.put("catch", .CATCH);
-    try keywords.put("assert", .ASSERT);
-    try keywords.put("suppress", .SUPPRESS);
-    try keywords.put("exclude", .EXCLUDE);
+    // try keywords.put("assert", .ASSERT);
+    // try keywords.put("suppress", .SUPPRESS);
+    // try keywords.put("exclude", .EXCLUDE);
     try keywords.put("throw", .THROW);
     try keywords.put("in", .IN);
     try keywords.put("as", .AS);
     try keywords.put("try", .TRY);
+
+    // primitive types here as well
+    try keywords.put("u8", .UINT8);
+    try keywords.put("u16", .UINT16);
+    try keywords.put("u32", .UINT32);
+    try keywords.put("u64", .UINT64);
+    try keywords.put("i8", .INT8);
+    try keywords.put("i16", .INT16);
+    try keywords.put("i32", .INT32);
+    try keywords.put("i64", .INT64);
+    try keywords.put("f32", .FLOAT32);
+    try keywords.put("f64", .FLOAT64);
+    try keywords.put("bool", .BOOL);
+    try keywords.put("void", .VOID);
 
     return keywords;
 }
@@ -250,10 +280,14 @@ pub const Tokenizer = struct {
 
         if (peek(self) == '.' and isDigit(peekNext(self))) {
             advance(self);
+            
             while (isDigit(peek(self))) advance(self);
-        }
 
-        try addToken(self, .NUMBER, alloc);
+            try addToken(self, .FLOAT, alloc);
+            return;
+        }
+                    
+        try addToken(self, .INTEGER, alloc);
     }
 
     fn peekNext(self: *Tokenizer) u8 {
