@@ -1,8 +1,6 @@
 const std = @import("std");
 const main = @import("main.zig");
 
-// TODO: tokenisoi primitiiviset tyypit
-
 pub const TokenType = enum {
     LEFT_PAREN,
     RIGHT_PAREN,
@@ -49,6 +47,12 @@ pub const TokenType = enum {
     FLOAT,
     IDENTIFIER,
     STRING,
+    CHARACTER,
+
+    C_INT,
+    C_FLOAT,
+    C_DOUBLE,
+    C_CHAR,
 
     USE,
     LET,
@@ -78,6 +82,7 @@ pub const TokenType = enum {
     IN,
     AS,
     TRY,
+    PUB,
     
     EOF
 };
@@ -102,8 +107,7 @@ fn initTokens() std.array_list.Aligned(Token, null) {
 fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     var keywords = std.StringHashMap(TokenType).init(allocator);
 
-    // greyed out ones will (most likely) be added later
-    // try keywords.put("use", .USE);
+    try keywords.put("use", .USE);
     try keywords.put("let", .LET);
     try keywords.put("mut", .MUT);
     try keywords.put("const", .CONST);
@@ -112,25 +116,26 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("for", .FOR);
     try keywords.put("while", .WHILE);
     try keywords.put("return", .RETURN);
-    try keywords.put("struct", .STRUCT);
-    try keywords.put("enum", .ENUM);
-    try keywords.put("union", .UNION);
+    //try keywords.put("struct", .STRUCT);
+    //try keywords.put("enum", .ENUM);
+    //try keywords.put("union", .UNION);
     try keywords.put("continue", .CONTINUE);
     try keywords.put("BREAK", .BREAK);
-    // try keywords.put("match", .MATCH);
+    try keywords.put("match", .MATCH);
     try keywords.put("if", .IF);
     try keywords.put("else", .ELSE);
-    // try keywords.put("std", .STD);
-    // try keywords.put("lib", .LIB);
-    // try keywords.put("extern", .EXTERN);
+    try keywords.put("std", .STD);
+    try keywords.put("lib", .LIB);
+    try keywords.put("extern", .EXTERN);
     try keywords.put("catch", .CATCH);
-    // try keywords.put("assert", .ASSERT);
-    // try keywords.put("suppress", .SUPPRESS);
-    // try keywords.put("exclude", .EXCLUDE);
+    try keywords.put("assert", .ASSERT);
+    try keywords.put("suppress", .SUPPRESS);
+    try keywords.put("exclude", .EXCLUDE);
     try keywords.put("throw", .THROW);
     try keywords.put("in", .IN);
     try keywords.put("as", .AS);
     try keywords.put("try", .TRY);
+    try keywords.put("pub", .PUB);
 
     // primitive types here as well
     try keywords.put("u8", .UINT8);
@@ -145,6 +150,10 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("f64", .FLOAT64);
     try keywords.put("bool", .BOOL);
     try keywords.put("void", .VOID);
+    try keywords.put("c_int", .C_INT);
+    try keywords.put("c_float", .C_FLOAT);
+    try keywords.put("c_double", .C_DOUBLE);
+    try keywords.put("c_char", .C_CHAR);
 
     return keywords;
 }
@@ -228,6 +237,7 @@ pub const Tokenizer = struct {
             '\n' => self.line += 1,
 
             '"' => try string(self, alloc),
+            '\'' => try character(self, alloc),
 
             else => {
                 if (isDigit(char)) {
@@ -239,6 +249,16 @@ pub const Tokenizer = struct {
                 }
             },
         }
+    }
+
+    fn character(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+        while (peek(self) != '\'' and !isAtEnd(self)) {
+            advance(self);
+        }
+
+        advance(self);
+
+        try addToken(self, .CHARACTER, alloc);
     }
 
     fn string(self: *Tokenizer, alloc: std.mem.Allocator) !void {

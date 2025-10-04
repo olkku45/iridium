@@ -1,5 +1,6 @@
 const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig").Tokenizer;
+const Parser = @import("Parser.zig").Parser;
 
 const print = std.debug.print;
 const printerr = std.log.err;
@@ -31,10 +32,16 @@ pub fn main() !void {
         var tokens = try tokenizer.getTokens(allocator);
         defer tokens.deinit(allocator);
         
-        for (0..tokens.items.len) |i| {
-            try stdout.print("{}\n", .{tokens.items[i]});
-            try stdout.flush();
-        }
+        //for (0..tokens.items.len) |i| {
+            //try stdout.print("{}\n", .{tokens.items[i]});
+            //try stdout.flush();
+        //}
+
+        var parser = Parser.init(tokens);
+        const program = try parser.parseTokens();
+
+        try stdout.print("{}\n", .{program});
+        try stdout.flush();
     }
 }
 
