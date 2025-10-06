@@ -1,9 +1,9 @@
 const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig").Tokenizer;
 const Parser = @import("Parser.zig").Parser;
+const CodeGen = @import("CodeGen.zig").CodeGen;
 
 const print = std.debug.print;
-const printerr = std.log.err;
 
 pub fn main() !void {
     while (true) {
@@ -37,11 +37,13 @@ pub fn main() !void {
             //try stdout.flush();
         //}
 
-        var parser = Parser.init(tokens);
-        const program = try parser.parseTokens();
+        var parser = Parser.init(tokens, allocator);
+        const ast = try parser.parseTokens();
 
-        try stdout.print("{}\n", .{program});
-        try stdout.flush();
+        //try stdout.print("{}\n", .{ast});
+        //try stdout.flush();
+
+        CodeGen.generateCode(ast);
     }
 }
 

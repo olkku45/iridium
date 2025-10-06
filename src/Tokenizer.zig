@@ -31,6 +31,9 @@ pub const TokenType = enum {
     STAR_EQUAL,
     SLASH_EQUAL,
 
+    AND,
+    OR,
+
     UINT8,
     UINT16,
     UINT32,
@@ -136,6 +139,8 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("as", .AS);
     try keywords.put("try", .TRY);
     try keywords.put("pub", .PUB);
+    try keywords.put("and", .AND);
+    try keywords.put("or", .OR);
 
     // primitive types here as well
     try keywords.put("u8", .UINT8);

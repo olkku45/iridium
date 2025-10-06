@@ -15,54 +15,57 @@ const Error = error{
     NotPutChar,
 };
 
-const Nodes = struct {
-    fn ProgramNode() type {
-        return struct {
-            program: FunctionCallNode(),
-        };
-    }
+pub const Node = union(enum) {
+    program: ProgramNode,
+    identifier: IdentifierNode,
+    argument: ArgumentNode,
+    literal: LiteralNode,
+    function_call: FunctionCallNode,
 
-    fn IdentifierNode() type {
-        return struct {
-            name: []const u8
-        };
-    }
+    pub const ProgramNode = struct {
+        program_ast: *Node,
+    };
 
-    fn ArgumentNode() type {
-        return struct {
-            argument_literal: LiteralNode(),  
-        };
-    }
+    pub const IdentifierNode = struct {
+        name: []const u8,
+    };
 
-    fn LiteralNode() type {
-        return struct {
-            value: []const u8,
-        };
-    }
+    pub const ArgumentNode = struct {
+        argument_literal: *Node,
+    };
 
-    fn FunctionCallNode() type {
-        return struct {
-            identifier: IdentifierNode(),
-            call_argument: ArgumentNode(),
-        };
-    }
+    pub const LiteralNode = struct {
+        value: []const u8,
+    };
+
+    pub const FunctionCallNode = struct {
+        identifier: *Node,
+        call_argument: *Node,
+    };
 };
 
 pub const Parser = struct {
     tokens: std.array_list.Aligned(Token, null),
     current: usize,
+    allocator: std.mem.Allocator,
 
-    pub fn init(tokens_list: std.array_list.Aligned(Token, null)) Parser {
+    pub fn init(tokens_list: std.array_list.Aligned(Token, null), allocator: std.mem.Allocator) Parser {
         return Parser{
             .tokens = tokens_list,
-            .current = 0,        
+            .current = 0,
+            .allocator = allocator,        
         };
     }
 
     // parse putchar()
-    pub fn parseTokens(self: *Parser) !Nodes.ProgramNode() {
+    pub fn parseTokens(self: *Parser) !Node {
         const function_call = try functionCall(self);
-        return Nodes.ProgramNode() {.program = function_call};
+        const call_ptr = try self.allocator.create(Node);
+        call_ptr.* = function_call;
+
+        return Node {.program = .{
+            .program_ast = call_ptr,
+        }};
     }
     
     // no need yet at least
@@ -86,22 +89,33 @@ pub const Parser = struct {
     }
     
     // FunctionCall : Identifier "(" Argument ")"
-    fn functionCall(self: *Parser) !Nodes.FunctionCallNode() {
+    fn functionCall(self: *Parser) !Node {
         const ident = identifier(self);
+        const ident_ptr = try self.allocator.create(Node);
+        ident_ptr.* = ident;
+
         // 'current' because calling identifier() advances current token
         if (self.tokens.items[self.current].token_type != .LEFT_PAREN) return Error.NotPutChar;
 
-        const arg = argument(self);
+        const arg = try argument(self);
+        const arg_ptr = try self.allocator.create(Node);
+        arg_ptr.* = arg;
 
-        return Nodes.FunctionCallNode() {.call_argument = arg, .identifier = ident};        
+        return Node {.function_call = .{
+            .call_argument = arg_ptr,
+            .identifier = ident_ptr,
+        }};        
     }
 
     // Identifier : \String of characters not reserved as a token\
-    fn identifier(self: *Parser) Nodes.IdentifierNode() {
+    fn identifier(self: *Parser) Node {
         const name = self.tokens.items[self.current].lexeme;
+
         // README: print identifier
-        std.debug.print("identifier: {s}\n", .{name});
-        const ident = Nodes.IdentifierNode() {.name = name};
+        //std.debug.print("identifier: {s}\n", .{name});
+        const ident = Node {.identifier = .{
+            .name = name,
+        }};
         
         advance(self);
 
@@ -109,21 +123,28 @@ pub const Parser = struct {
     }
 
     // Argument : Literal
-    fn argument(self: *Parser) Nodes.ArgumentNode() {
+    fn argument(self: *Parser) !Node {
         const lit = literal(self);
+        const lit_ptr = try self.allocator.create(Node);
+        lit_ptr.* = lit;
+        
         // README: print argument characters
-        std.debug.print("argument: {any}\n", .{lit});
-        const arg = Nodes.ArgumentNode() {.argument_literal = lit};
+        //std.debug.print("argument: {any}\n", .{lit});
+        const arg = Node {.argument = .{
+            .argument_literal = lit_ptr,
+        }};
         
         advance(self);
         return arg;
     }
 
     // Literal : \Any direct source code value\
-    fn literal(self: *Parser) Nodes.LiteralNode() {
+    fn literal(self: *Parser) Node {
         // self.current + 1 to take the character from putchar call
         const lexeme = self.tokens.items[self.current + 1].lexeme;
-        return Nodes.LiteralNode() {.value = lexeme};
+        return Node {.literal = .{
+            .value = lexeme,
+        }};
     }
 
     fn advance(self: *Parser) void {
