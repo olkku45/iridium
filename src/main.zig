@@ -43,7 +43,10 @@ pub fn main() !void {
         //try stdout.print("{}\n", .{ast});
         //try stdout.flush();
 
-        CodeGen.generateCode(ast);
+        var code_gen = CodeGen.init();
+        defer code_gen.deinit();
+
+        code_gen.compile(ast);
     }
 }
 

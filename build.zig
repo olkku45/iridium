@@ -153,5 +153,9 @@ pub fn build(b: *std.Build) void {
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
+    mod.linkSystemLibrary("LLVM", .{});
     mod.link_libc = true;
+
+    const ir_file = b.addInstallFile(exe.getEmittedLlvmIr(), "putchar.ll");
+    b.getInstallStep().dependOn(&ir_file.step);
 }
