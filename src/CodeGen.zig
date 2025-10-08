@@ -13,7 +13,13 @@ const c = @cImport({
     @cInclude("llvm-c/BitWriter.h");
 });
 
-var global_putchar_val: u8 = undefined;
+//var global_putchar_val: u8 = undefined;
+var global_putchar_values: std.array_list.Aligned(u8, null) = .empty;
+
+const CodeGenError = error{
+    NotPutChar,
+    EmptyLine
+};
 
 pub const CodeGen = struct {
     context: c.LLVMContextRef,
@@ -38,36 +44,8 @@ pub const CodeGen = struct {
         c.LLVMContextDispose(self.context);
     }
 
-    fn generateCode(self: *CodeGen, node: Node) c.LLVMValueRef {
-        switch (node) {
-            .program => |program| {
-                //print("program\n", .{});
-                _ = generateCode(self, program.program_ast.*);
-            },
-            .identifier => {
-                //print("identifier\n", .{});
-                //return identifier(node);
-            },
-            .argument => {
-                //print("argument\n", .{});
-                //return argument(arg);
-            },
-            .literal => {
-                //print("literal\n", .{});
-                //return literal(node);
-            }, 
-            .function_call => |func_call| {
-                //print("function call\n", .{});
-                return functionCall(self, func_call.call_argument);
-            },
-        }
-
-        const msg = "error";
-        return c.LLVMConstString(msg, msg.len, 1);
-    }
-
-    pub fn compile(self: *CodeGen, ast: Node) void {
-        const ir = generateCode(self, ast);
+    pub fn compile(self: *CodeGen, ast: Node) !void {
+        const ir = try returnDeclaration(self, ast);
         _ = c.LLVMBuildRet(self.builder, ir);
 
         createMain(self);
@@ -79,6 +57,38 @@ pub const CodeGen = struct {
         }
 
         c.LLVMDumpModule(self.module);
+    }
+
+    fn returnDeclaration(self: *CodeGen, ast: Node) !c.LLVMValueRef {
+        var call: c.LLVMValueRef = c.LLVMConstInt(c.LLVMInt32Type(), 1, 0);
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const alloc = gpa.allocator();
+
+        // TODO: probably a simpler way to do this...
+        for (ast.program.program_ast.items) |putchar_call| {
+            const thing = putchar_call.*.function_call.call_argument;
+            const thing2 = thing.argument.argument_literal.*;
+            const thing3 = thing2.literal.value;
+            const char = thing3[1];
+
+            print("to append: {d}\n", .{char});
+            
+            try global_putchar_values.append(alloc, char);
+        }
+        
+        for (ast.program.program_ast.items) |putchar_call| {
+            switch (putchar_call.*) {
+                .function_call => |func_call| {
+                    call = try functionCall(self, func_call.call_argument);
+                    
+                    break;
+                },
+                else => {},
+            }
+        }
+
+        return call;
     }
 
     fn createMain(self: *CodeGen) void {
@@ -97,18 +107,19 @@ pub const CodeGen = struct {
 
         const putchar_type = c.LLVMGlobalGetValueType(putchar_func);
 
-        const putchar_arg = global_putchar_val;
-        const char_val = c.LLVMConstInt(c.LLVMInt32Type(), putchar_arg, 0);
-        var putchar_args = [_]c.LLVMValueRef{char_val};
+        for (global_putchar_values.items) |value| {
+            const char_val = c.LLVMConstInt(c.LLVMInt32Type(), value, 0);
+            var putchar_args = [_]c.LLVMValueRef{char_val};
 
-        _ = c.LLVMBuildCall2(
-            self.builder,
-            putchar_type,
-            putchar_func,
-            &putchar_args,
-            1,
-            ""
-        );
+            _ = c.LLVMBuildCall2(
+                self.builder,
+                putchar_type,
+                putchar_func,
+                &putchar_args,
+                1,
+                "",
+            );
+        }
 
         const nl = '\n';
         const nl_val = c.LLVMConstInt(c.LLVMInt32Type(), nl, 0);
@@ -133,29 +144,28 @@ pub const CodeGen = struct {
         return c.LLVMConstString(value, value.len, 1);
     }
 
-    fn argument(arg: *Node) c.LLVMValueRef {
-        return literal(arg.argument.argument_literal.*.literal.value);
+    fn argument(arg: *Node) !c.LLVMValueRef {
+        return try literal(arg.argument.argument_literal.*.literal.value);
     }
 
     // return the char in the putchar call
-    fn literal(lit: []const u8) c.LLVMValueRef {
-        // TODO: tokenize characters better, take just the character not the quotes
+    fn literal(lit: []const u8) !c.LLVMValueRef {
+        // TODO: tokenize/parse characters better,
+        // take just the character not the quotes?
         const char = lit[1];
-        global_putchar_val = char;
             
         return c.LLVMConstInt(c.LLVMInt32Type(), char, 0);
     }
 
     // no need for identifier yet since we only have 'putchar'
-    fn functionCall(self: *CodeGen, arg: *Node) c.LLVMValueRef {
+    // this is to generate the function declaration
+    fn functionCall(self: *CodeGen, arg: *Node) !c.LLVMValueRef {
         var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32Type() };
         const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), &param_types, 1, 0);
         const putChar = c.LLVMAddFunction(self.module, "putchar", func_type);
 
-        const func_arg = argument(arg);
+        const func_arg = try argument(arg);
         var args = [_]c.LLVMValueRef{ func_arg };
-
-        //const func_ident = identifier(ident);
 
         return c.LLVMBuildCall2(
             self.builder,
@@ -165,5 +175,10 @@ pub const CodeGen = struct {
             1,
             "",
         );
+    }
+
+    fn getCharFromPutcharCall(arg: *Node) u8 {
+        const val = arg.argument.argument_literal.*.literal.value;
+        return val[1];
     }
 };

@@ -8,6 +8,7 @@ pub const TokenType = enum {
     RIGHT_BRACKET,
     LEFT_BRACE,
     RIGHT_BRACE,
+    
     COMMA,
     DOT,
     MINUS,
@@ -26,6 +27,7 @@ pub const TokenType = enum {
     GREATER_EQUAL,
     LESS,
     LESS_EQUAL,
+
     PLUS_EQUAL,
     MINUS_EQUAL,
     STAR_EQUAL,
@@ -33,7 +35,6 @@ pub const TokenType = enum {
 
     AND,
     OR,
-
     UINT8,
     UINT16,
     UINT32,
@@ -51,12 +52,11 @@ pub const TokenType = enum {
     IDENTIFIER,
     STRING,
     CHARACTER,
-
     C_INT,
     C_FLOAT,
     C_DOUBLE,
     C_CHAR,
-
+    
     USE,
     LET,
     MUT,
@@ -86,7 +86,7 @@ pub const TokenType = enum {
     AS,
     TRY,
     PUB,
-    
+
     EOF
 };
 
@@ -188,22 +188,24 @@ pub const Tokenizer = struct {
 
     pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) !std.array_list.Aligned(Token, null) {
         while (!isAtEnd(self)) {
-            self.start = self.current;            
+            self.start = self.current;
             try getToken(self, allocator);
         }
 
-        try self.tokens.append(allocator, Token {.token_type = .EOF, .lexeme = "EOF"});
+        try self.tokens.append(allocator, Token{ .token_type = .EOF, .lexeme = "EOF" });
         return self.tokens;
     }
 
     fn addToken(self: *Tokenizer, token_type: TokenType, allocator: std.mem.Allocator) !void {
-        const text = self.source[self.start .. self.current];
-        try self.tokens.append(allocator, Token {.lexeme = text, .token_type = token_type});
+        const text = self.source[self.start..self.current];
+        const token_value = try allocator.dupe(u8, text);
+        
+        try self.tokens.append(allocator, Token{ .lexeme = token_value, .token_type = token_type });
     }
 
     fn getToken(self: *Tokenizer, alloc: std.mem.Allocator) !void {
         const char = advanceGetChar(self);
-        
+
         switch (char) {
             '(' => try addToken(self, .LEFT_PAREN, alloc),
             ')' => try addToken(self, .RIGHT_PAREN, alloc),
@@ -257,10 +259,9 @@ pub const Tokenizer = struct {
     }
 
     fn character(self: *Tokenizer, alloc: std.mem.Allocator) !void {
-        while (peek(self) != '\'' and !isAtEnd(self)) {
-            advance(self);
-        }
+        if (peekNext(self) != '\'') return;
 
+        advance(self);
         advance(self);
 
         try addToken(self, .CHARACTER, alloc);
@@ -305,13 +306,13 @@ pub const Tokenizer = struct {
 
         if (peek(self) == '.' and isDigit(peekNext(self))) {
             advance(self);
-            
+
             while (isDigit(peek(self))) advance(self);
 
             try addToken(self, .FLOAT, alloc);
             return;
         }
-                    
+
         try addToken(self, .INTEGER, alloc);
     }
 
@@ -321,14 +322,14 @@ pub const Tokenizer = struct {
 
     fn isAlpha(char: u8) bool {
         return (char >= 'a' and char <= 'z') or
-                (char >= 'A' and char <= 'Z') or
-                (char == '_');
+            (char >= 'A' and char <= 'Z') or
+            (char == '_');
     }
 
     fn identifier(self: *Tokenizer, alloc: std.mem.Allocator) !void {
         while (isAlphaNumeric(peek(self))) advance(self);
 
-        const text = self.source[self.start .. self.current];
+        const text = self.source[self.start..self.current];
         const token_type = self.keywords.get(text) orelse TokenType.IDENTIFIER;
 
         try addToken(self, token_type, alloc);
