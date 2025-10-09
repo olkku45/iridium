@@ -18,20 +18,15 @@ const Error = error{
 pub const Node = union(enum) {
     program: ProgramNode,
     identifier: IdentifierNode,
-    argument: ArgumentNode,
     literal: LiteralNode,
     function_call: FunctionCallNode,
 
     pub const ProgramNode = struct {
-        program_ast: std.array_list.Aligned(*Node, null) = .empty,
+        program_ast: std.array_list.Aligned(*Node, null),
     };
 
     pub const IdentifierNode = struct {
         name: []const u8,
-    };
-
-    pub const ArgumentNode = struct {
-        argument_literal: *Node,
     };
 
     pub const LiteralNode = struct {
@@ -39,8 +34,8 @@ pub const Node = union(enum) {
     };
 
     pub const FunctionCallNode = struct {
-        identifier: *Node,
-        call_argument: *Node,
+        func_identifier: *Node,
+        func_argument: *Node, // type: identifier
     };
 };
 
@@ -59,26 +54,19 @@ pub const Parser = struct {
         };
     }
 
-    // parse multiple putchar()-calls
-    pub fn parseTokens(self: *Parser) !Node {
+    pub fn deinit(self: *Parser) void {
+        self.ast.deinit(self.allocator);
+    }
+
+    pub fn parseProgram(self: *Parser) !Node {
         while (!isAtEnd(self)) {
-            const token = getCurrentToken(self);
+            const func_call = try functionCall(self);
+            const call_ptr = try self.allocator.create(Node);
+            call_ptr.* = func_call;
             
-            switch (token.token_type) {
-                .IDENTIFIER => {
-                    const func_call = try functionCall(self);
-                    const call_ptr = try self.allocator.create(Node);
-                    call_ptr.* = func_call;
-
-                    try self.ast.append(self.allocator, call_ptr);
-                },
-                .SEMICOLON, .EOF => advance(self),
-                else => {},
-            }
-
-            advance(self);
+            try self.ast.append(self.allocator, call_ptr);
         }
-
+        
         return Node {.program = .{
             .program_ast = self.ast,
         }};
@@ -99,20 +87,24 @@ pub const Parser = struct {
         const ident_ptr = try self.allocator.create(Node);
         ident_ptr.* = ident;
 
-        const arg = try argument(self);
-        const arg_ptr = try self.allocator.create(Node);
-        arg_ptr.* = arg;
+        advance(self); // eat left_paren
 
-        return Node{ .function_call = .{
-            .call_argument = arg_ptr,
-            .identifier = ident_ptr,
-        } };
+        const arg_lit = arg_literal(self);
+        const arg_lit_ptr = try self.allocator.create(Node);
+        arg_lit_ptr.* = arg_lit;
+
+        advance(self); // eat right_paren
+        advance(self); // eat semicolon TODO: later have 'statement' do this
+
+        return Node{.function_call = .{
+            .func_argument = arg_lit_ptr,
+            .func_identifier = ident_ptr, 
+        }};
     }
 
     // Identifier : \String of characters not reserved as a token\
     fn identifier(self: *Parser) Node {
         const name = self.tokens.items[self.current].lexeme;
-
         const ident = Node{ .identifier = .{
             .name = name,
         } };
@@ -122,31 +114,30 @@ pub const Parser = struct {
         return ident;
     }
 
-    // Argument : Literal
-    fn argument(self: *Parser) !Node {
-        advance(self); // skip left_paren
-        
-        const lit = literal(self);
-        const lit_ptr = try self.allocator.create(Node);
-        lit_ptr.* = lit;
+    fn arg_literal(self: *Parser) Node {
+        const lexeme = self.tokens.items[self.current].lexeme;
 
-        advance(self); // skip right_paren
-        
-        const arg = Node{ .argument = .{
-            .argument_literal = lit_ptr,
-        } };
+        advance(self);
 
-        return arg;
+        return Node{.literal = .{
+            .value = lexeme,
+        }};
     }
 
     // Literal : \Any direct source code value\
     fn literal(self: *Parser) Node {
         const lexeme = self.tokens.items[self.current].lexeme;
-        return Node{ .literal = .{
+        const lit = Node{.literal = .{
             .value = lexeme,
-        } };
+        }};
+        
+        advance(self);
+        
+        return lit;
     }
 
+    // TODO: add token type to advance so we can check
+    // correct type
     fn advance(self: *Parser) void {
         self.current += 1;
     }

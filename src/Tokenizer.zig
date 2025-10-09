@@ -192,7 +192,7 @@ pub const Tokenizer = struct {
             try getToken(self, allocator);
         }
 
-        try self.tokens.append(allocator, Token{ .token_type = .EOF, .lexeme = "EOF" });
+        // no EOF token anymore
         return self.tokens;
     }
 

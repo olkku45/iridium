@@ -13,12 +13,11 @@ const c = @cImport({
     @cInclude("llvm-c/BitWriter.h");
 });
 
-//var global_putchar_val: u8 = undefined;
-var global_putchar_values: std.array_list.Aligned(u8, null) = .empty;
-
 const CodeGenError = error{
     NotPutChar,
-    EmptyLine
+    EmptyLine,
+    TargetMachineCreationFailed,
+    EmitFailed,
 };
 
 pub const CodeGen = struct {
@@ -45,10 +44,9 @@ pub const CodeGen = struct {
     }
 
     pub fn compile(self: *CodeGen, ast: Node) !void {
-        const ir = try returnDeclaration(self, ast);
-        _ = c.LLVMBuildRet(self.builder, ir);
+        declarePutchar(self);
 
-        createMain(self);
+        createMain(self, ast);
 
         var error_msg: [*c]u8 = null;
         if (c.LLVMPrintModuleToFile(self.module, "putchar.ll", &error_msg) != 0) {
@@ -56,42 +54,64 @@ pub const CodeGen = struct {
             c.LLVMDisposeMessage(error_msg);
         }
 
+        c.LLVMInitializeAllTargetInfos();
+        c.LLVMInitializeAllTargets();
+        c.LLVMInitializeAllTargetMCs();
+        c.LLVMInitializeAllAsmParsers();
+        c.LLVMInitializeAllAsmPrinters();
+
+        const target_triple = c.LLVMGetDefaultTargetTriple();
+        defer c.LLVMDisposeMessage(target_triple);
+
+        var target: c.LLVMTargetRef = undefined;
+        var target_error_msg: [*c]u8 = undefined;
+        if (c.LLVMGetTargetFromTriple(target_triple, &target, &target_error_msg) != 0) {
+            print("Target error: {s}\n", .{target_error_msg});
+            c.LLVMDisposeMessage(target_error_msg);
+        }
+
+        const cpu = "generic";
+        const features = "";
+        const opt_level = c.LLVMCodeGenLevelDefault;
+        const reloc_mode = c.LLVMRelocPIC;
+        const code_model = c.LLVMCodeModelDefault;
+
+        const target_machine = c.LLVMCreateTargetMachine(
+            target,
+            target_triple,
+            cpu,
+            features,
+            opt_level,
+            reloc_mode,
+            code_model,
+        );
+
+        if (target_machine == null) return error.TargetMachineCreationFailed;
+
+        if (c.LLVMTargetMachineEmitToFile(
+            target_machine,
+            self.module,
+            "test.o",
+            c.LLVMObjectFile,
+            &target_error_msg,
+        ) != 0) {
+                print("Error emitting object file: {s}\n", .{target_error_msg});
+                c.LLVMDisposeMessage(target_error_msg);
+                return error.EmitFailed;
+            }
+
+        c.LLVMDisposeTargetMachine(target_machine);
+
         c.LLVMDumpModule(self.module);
     }
 
-    fn returnDeclaration(self: *CodeGen, ast: Node) !c.LLVMValueRef {
-        var call: c.LLVMValueRef = c.LLVMConstInt(c.LLVMInt32Type(), 1, 0);
-
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const alloc = gpa.allocator();
-
-        // TODO: probably a simpler way to do this...
-        for (ast.program.program_ast.items) |putchar_call| {
-            const thing = putchar_call.*.function_call.call_argument;
-            const thing2 = thing.argument.argument_literal.*;
-            const thing3 = thing2.literal.value;
-            const char = thing3[1];
-
-            print("to append: {d}\n", .{char});
-            
-            try global_putchar_values.append(alloc, char);
-        }
-        
-        for (ast.program.program_ast.items) |putchar_call| {
-            switch (putchar_call.*) {
-                .function_call => |func_call| {
-                    call = try functionCall(self, func_call.call_argument);
-                    
-                    break;
-                },
-                else => {},
-            }
-        }
-
-        return call;
+    fn declarePutchar(self: *CodeGen) void {
+        var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32Type() };
+        const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), &param_types, 1, 0);
+        _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
-    fn createMain(self: *CodeGen) void {
+    fn createMain(self: *CodeGen, ast: Node) void {
         const main_type = c.LLVMFunctionType(c.LLVMInt32Type(), null, 0, 0);
         const main = c.LLVMAddFunction(self.module, "main", main_type);
 
@@ -107,15 +127,26 @@ pub const CodeGen = struct {
 
         const putchar_type = c.LLVMGlobalGetValueType(putchar_func);
 
-        for (global_putchar_values.items) |value| {
-            const char_val = c.LLVMConstInt(c.LLVMInt32Type(), value, 0);
-            var putchar_args = [_]c.LLVMValueRef{char_val};
+        const program = ast.program;
+        
+        for (program.program_ast.items) |node_ptr| {
+            var char: u8 = 0;
+            
+            switch (node_ptr.*) {
+                .function_call => |call| {
+                    const arg = call.func_argument.*;
+                    char = arg.literal.value[1];
+                },
+                else => {},
+            }
 
+            const char_val = c.LLVMConstInt(c.LLVMInt32Type(), char, 0);
+            var args = [_]c.LLVMValueRef{char_val};
             _ = c.LLVMBuildCall2(
                 self.builder,
                 putchar_type,
                 putchar_func,
-                &putchar_args,
+                &args,
                 1,
                 "",
             );
@@ -155,30 +186,5 @@ pub const CodeGen = struct {
         const char = lit[1];
             
         return c.LLVMConstInt(c.LLVMInt32Type(), char, 0);
-    }
-
-    // no need for identifier yet since we only have 'putchar'
-    // this is to generate the function declaration
-    fn functionCall(self: *CodeGen, arg: *Node) !c.LLVMValueRef {
-        var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32Type() };
-        const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), &param_types, 1, 0);
-        const putChar = c.LLVMAddFunction(self.module, "putchar", func_type);
-
-        const func_arg = try argument(arg);
-        var args = [_]c.LLVMValueRef{ func_arg };
-
-        return c.LLVMBuildCall2(
-            self.builder,
-            func_type,
-            putChar,
-            &args,
-            1,
-            "",
-        );
-    }
-
-    fn getCharFromPutcharCall(arg: *Node) u8 {
-        const val = arg.argument.argument_literal.*.literal.value;
-        return val[1];
     }
 };

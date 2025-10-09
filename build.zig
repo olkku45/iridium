@@ -88,7 +88,7 @@ pub fn build(b: *std.Build) void {
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
-
+    
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.
@@ -155,7 +155,4 @@ pub fn build(b: *std.Build) void {
     // and reading its source code will allow you to master it.
     mod.linkSystemLibrary("LLVM", .{});
     mod.link_libc = true;
-
-    const ir_file = b.addInstallFile(exe.getEmittedLlvmIr(), "putchar.ll");
-    b.getInstallStep().dependOn(&ir_file.step);
 }
