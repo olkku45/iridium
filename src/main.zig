@@ -34,6 +34,7 @@ pub fn main() !void {
     const file_str = try std.fs.cwd().readFileAlloc(allocator, file_name, 1_000_000_000);
 
     var tokenizer = try Tokenizer.init(allocator, file_str);
+    
     var line_tokens = try tokenizer.getTokens(allocator);
 
     for (line_tokens.items) |token| {

@@ -15,11 +15,17 @@ const Error = error{
     NotPutChar,
 };
 
+pub const Type = union(enum) {
+    c_int,
+    void,
+};
+
 pub const Node = union(enum) {
     program: ProgramNode,
     identifier: IdentifierNode,
     literal: LiteralNode,
     function_call: FunctionCallNode,
+    extern_fn_decl: ExternFnDeclarationNode,
 
     pub const ProgramNode = struct {
         program_ast: std.array_list.Aligned(*Node, null),
@@ -35,7 +41,13 @@ pub const Node = union(enum) {
 
     pub const FunctionCallNode = struct {
         func_identifier: *Node,
-        func_argument: *Node, // type: identifier
+        func_argument: *Node, // type: literal
+    };
+
+    pub const ExternFnDeclarationNode = struct {
+        func_identifier: *Node,
+        arg_type: Type,
+        ret_type: Type,
     };
 };
 
@@ -60,16 +72,33 @@ pub const Parser = struct {
 
     pub fn parseProgram(self: *Parser) !Node {
         while (!isAtEnd(self)) {
-            const func_call = try functionCall(self);
-            const call_ptr = try self.allocator.create(Node);
-            call_ptr.* = func_call;
+            const node = try parseToken(self);
+            const node_ptr = try self.allocator.create(Node);
+            node_ptr.* = node;
             
-            try self.ast.append(self.allocator, call_ptr);
+            try self.ast.append(self.allocator, node_ptr);
         }
         
         return Node {.program = .{
             .program_ast = self.ast,
         }};
+    }
+
+    fn parseToken(self: *Parser) !Node {
+        const current_token_type = getCurrentToken(self).token_type;
+        var node: Node = undefined;
+        
+        switch (current_token_type) {
+            .EXTERN => {
+                node = try externFnDeclaration(self);
+            },
+            .IDENTIFIER => {
+                node = try functionCall(self);
+            },
+            else => {},
+        }
+
+        return node;
     }
 
     fn isAtEnd(self: *Parser) bool {
@@ -81,7 +110,46 @@ pub const Parser = struct {
         return current_token;
     }
 
-    // FunctionCall : Identifier "(" Argument ")"
+    // Extern fn decl : "extern" "fn" Identifier "(" Arg_Type ")" "->" Ret_Type ";"
+    fn externFnDeclaration(self: *Parser) !Node {
+        // eat keywords
+        advance(self);
+        advance(self);
+        
+        const ident = identifier(self);
+        const ident_ptr = try self.allocator.create(Node);
+        ident_ptr.* = ident;
+
+        advance(self);
+        const arg_type = argumentType(self);
+        advance(self);
+        advance(self); 
+        const ret_type = returnType(self);
+        advance(self); // eat semicolon // TODO: decouple this sometime
+
+        return Node{.extern_fn_decl = .{
+            .arg_type = arg_type,
+            .ret_type = ret_type,
+            .func_identifier = ident_ptr,
+        }};
+    }
+
+    // README: hardcoded c_int for now
+    fn argumentType(self: *Parser) Type {
+        // eat the three tokens
+        advance(self);
+        advance(self);
+        advance(self);
+        return .c_int;
+    }
+
+    // README: hardcoded c_int for now
+    fn returnType(self: *Parser) Type {
+        advance(self);
+        return .c_int;
+    }
+
+    // FunctionCall : Identifier "(" Argument ")" ";"
     fn functionCall(self: *Parser) !Node {
         const ident = identifier(self);
         const ident_ptr = try self.allocator.create(Node);

@@ -33,6 +33,8 @@ pub const TokenType = enum {
     STAR_EQUAL,
     SLASH_EQUAL,
 
+    RIGHT_ARROW,
+
     AND,
     OR,
     UINT8,
@@ -215,7 +217,14 @@ pub const Tokenizer = struct {
             '}' => try addToken(self, .RIGHT_BRACE, alloc),
             ',' => try addToken(self, .COMMA, alloc),
             '.' => try addToken(self, .DOT, alloc),
-            '-' => if (match(self, '=')) try addToken(self, .MINUS_EQUAL, alloc) else try addToken(self, .MINUS, alloc),
+            '-' => {
+                if (match(self, '>')) {
+                    try addToken(self, .RIGHT_ARROW, alloc);
+                    return;
+                }
+                if (match(self, '=')) try addToken(self, .MINUS_EQUAL, alloc)
+                else try addToken(self, .MINUS, alloc);
+            },
             '+' => if (match(self, '=')) try addToken(self, .PLUS_EQUAL, alloc) else try addToken(self, .PLUS, alloc),
             ';' => try addToken(self, .SEMICOLON, alloc),
             '/' => {
