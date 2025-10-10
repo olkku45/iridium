@@ -26,7 +26,10 @@ pub const Node = union(enum) {
     literal: LiteralNode,
     function_call: FunctionCallNode,
     extern_fn_decl: ExternFnDeclarationNode,
+    function_decl: FunctionDeclarationNode,
+    return_statement: ReturnStatementNode,
 
+    // TODO: do we need to deinit these arraylists as well?
     pub const ProgramNode = struct {
         program_ast: std.array_list.Aligned(*Node, null),
     };
@@ -47,6 +50,17 @@ pub const Node = union(enum) {
     pub const ExternFnDeclarationNode = struct {
         func_identifier: *Node,
         arg_type: Type,
+        ret_type: Type,
+    };
+
+    pub const FunctionDeclarationNode = struct {
+        name: []const u8,
+        body: std.array_list.Aligned(*Node, null),
+        // parameters: []*Node,
+        // ret_type: Type,
+    };
+
+    pub const ReturnStatementNode = struct {
         ret_type: Type,
     };
 };
@@ -92,8 +106,14 @@ pub const Parser = struct {
             .EXTERN => {
                 node = try externFnDeclaration(self);
             },
+            // TODO: remove
             .IDENTIFIER => {
                 node = try functionCall(self);
+            },
+            .FN => {
+                if (peekType(self) == .IDENTIFIER) {
+                    node = try functionDeclaration(self);
+                }
             },
             else => {},
         }
@@ -101,8 +121,40 @@ pub const Parser = struct {
         return node;
     }
 
+    fn functionDeclaration(self: *Parser) !Node {
+        // TODO: do we have to deinit this? we'll see!
+        var func_body: std.array_list.Aligned(*Node, null) = .empty;
+        
+        advance(self); // eat fn token
+        const name = self.tokens.items[self.current].lexeme;
+
+        while (self.tokens.items[self.current].token_type != .LEFT_BRACE) advance(self);
+
+        advance(self); // eat left brace
+        
+        while (self.tokens.items[self.current].token_type != .RETURN) {
+            // assumption that we only have putchar-calls
+            const current = try functionCall(self);
+            const current_ptr = try self.allocator.create(Node);
+            current_ptr.* = current;
+            try func_body.append(self.allocator, current_ptr);
+        }
+
+        // hardcoded return type
+        while (self.tokens.items[self.current].token_type != .RIGHT_BRACE) advance(self);
+
+        return Node{ .function_decl = .{
+            .body = func_body,
+            .name = name,
+        }};
+    }
+
+    fn peekType(self: *Parser) TokenType {
+        return self.tokens.items[self.current + 1].token_type;
+    }
+
     fn isAtEnd(self: *Parser) bool {
-        return self.current >= self.tokens.items.len;
+        return self.current + 1 == self.tokens.items.len;
     }
 
     fn getCurrentToken(self: *Parser) Token {
@@ -125,7 +177,7 @@ pub const Parser = struct {
         advance(self);
         advance(self); 
         const ret_type = returnType(self);
-        advance(self); // eat semicolon // TODO: decouple this sometime
+        advance(self); // eat semicolon // TODO: decouple this sometime?
 
         return Node{.extern_fn_decl = .{
             .arg_type = arg_type,
@@ -162,7 +214,7 @@ pub const Parser = struct {
         arg_lit_ptr.* = arg_lit;
 
         advance(self); // eat right_paren
-        advance(self); // eat semicolon TODO: later have 'statement' do this
+        advance(self); // eat semicolon TODO: later have 'statement' do this?
 
         return Node{.function_call = .{
             .func_argument = arg_lit_ptr,
@@ -182,6 +234,7 @@ pub const Parser = struct {
         return ident;
     }
 
+    // TODO: this is the same as literal() so replace and remove
     fn arg_literal(self: *Parser) Node {
         const lexeme = self.tokens.items[self.current].lexeme;
 

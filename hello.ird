@@ -1,0 +1,10 @@
+extern fn putchar(c: c_int) -> c_int;
+
+fn main() -> c_int {
+	putchar('H');
+	putchar('e');
+	putchar('l');
+	putchar('l');
+	putchar('o');
+	return 0;
+}

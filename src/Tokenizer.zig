@@ -352,7 +352,7 @@ pub const Tokenizer = struct {
         if (isAtEnd(self)) return false;
         if (self.source[self.current] != char) return false;
 
-        self.current += 1;
+        advance(self);
         return true;
     }
 };

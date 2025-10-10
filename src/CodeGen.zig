@@ -44,9 +44,11 @@ pub const CodeGen = struct {
     }
 
     pub fn compile(self: *CodeGen, ast: Node) !void {
-        declareFunctions(self);
+        //declareFunctions(self);
         // README: the ast is traversed in createMain()
-        createMain(self, ast);
+        //createMain(self, ast);
+        // new:
+        try generateProgramCode(self, ast);
 
         c.LLVMInitializeAllTargetInfos();
         c.LLVMInitializeAllTargets();
@@ -99,16 +101,33 @@ pub const CodeGen = struct {
         c.LLVMDumpModule(self.module);
     }
 
+    // TODO: remove
     fn declareFunctions(self: *CodeGen) void {
         declarePutchar(self);
     }
 
+    fn generateProgramCode(self: *CodeGen, ast: Node) !void {
+        for (ast.program.program_ast.items) |node_ptr| {
+            switch (node_ptr.*) {
+                .extern_fn_decl => {
+                    declarePutchar(self);
+                },
+                .function_decl => |declaration| {
+                    try createFunction(self, declaration.name, node_ptr);
+                },
+                else => {},
+            }
+        }
+    }
+
+    // TODO: remove
     fn traverseAst(self: *CodeGen, ast: Node) void {
         for (ast.program.program_ast.items) |node_ptr| {
             generateCode(self, node_ptr);
         }
     }
 
+    // TODO: remove
     fn generateCode(self: *CodeGen, node_ptr: *Node) void {
         switch (node_ptr.*) {
             .function_call => |call| {
@@ -153,6 +172,38 @@ pub const CodeGen = struct {
         c.LLVMPositionBuilderAtEnd(self.builder, entry);
 
         traverseAst(self, ast); // just generate putchar-calls for now
+
+        const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
+
+        _ = c.LLVMBuildRet(self.builder, ret_val);
+    }
+
+    // create main function
+    fn createFunction(self: *CodeGen, name: []const u8, decl: *Node) !void {
+        // TODO: make 'self' have allocator
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const alloc = gpa.allocator();
+
+        // add null termination
+        const name_copy = try std.fmt.allocPrint(alloc, "{s}", .{name});
+        defer alloc.free(name_copy);
+        
+        const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), null, 0, 0);
+        const func = c.LLVMAddFunction(self.module, name_copy.ptr, func_type);
+
+        const block = c.LLVMAppendBasicBlock(func, "block");
+        c.LLVMPositionBuilderAtEnd(self.builder, block);
+
+        for (decl.*.function_decl.body.items) |statement| {
+            switch (statement.*) {
+                .function_call => |call| {
+                    const putchar_arg = call.func_argument.*;
+                    const putchar_char = putchar_arg.literal.value[1];
+                    createPutcharCall(self, putchar_char);
+                },
+                else => {},
+            }
+        } 
 
         const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
 
