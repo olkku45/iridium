@@ -135,7 +135,7 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("catch", .CATCH);
     try keywords.put("assert", .ASSERT);
     try keywords.put("suppress", .SUPPRESS);
-    try keywords.put("exclude", .EXCLUDE);
+    //try keywords.put("exclude", .EXCLUDE);
     try keywords.put("throw", .THROW);
     try keywords.put("in", .IN);
     try keywords.put("as", .AS);
@@ -268,9 +268,7 @@ pub const Tokenizer = struct {
     }
 
     fn character(self: *Tokenizer, alloc: std.mem.Allocator) !void {
-        if (peekNext(self) != '\'') return;
-
-        advance(self);
+        while (peek(self) != '\'' and !isAtEnd(self)) advance(self);
         advance(self);
 
         try addToken(self, .CHARACTER, alloc);

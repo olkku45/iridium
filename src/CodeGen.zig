@@ -1,6 +1,7 @@
 const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
 const Node = @import("Parser.zig").Node;
+const Type = @import("Parser.zig").Type;
 
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
@@ -120,25 +121,6 @@ pub const CodeGen = struct {
         }
     }
 
-    // TODO: remove
-    fn traverseAst(self: *CodeGen, ast: Node) void {
-        for (ast.program.program_ast.items) |node_ptr| {
-            generateCode(self, node_ptr);
-        }
-    }
-
-    // TODO: remove
-    fn generateCode(self: *CodeGen, node_ptr: *Node) void {
-        switch (node_ptr.*) {
-            .function_call => |call| {
-                const arg = call.func_argument.*;
-                const char = arg.literal.value[1];
-                createPutcharCall(self, char);
-            },
-            else => {},
-        }
-    }
-
     fn createPutcharCall(self: *CodeGen, char: u8) void {
         const putchar_func = c.LLVMGetNamedFunction(self.module, "putchar");
         const putchar_type = c.LLVMGlobalGetValueType(putchar_func);
@@ -162,25 +144,9 @@ pub const CodeGen = struct {
         _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
-    // TODO: remove after generateCode knows how to make a main function,
-    // that is after you can make a main function in the code
-    fn createMain(self: *CodeGen, ast: Node) void {
-        const main_type = c.LLVMFunctionType(c.LLVMInt32Type(), null, 0, 0);
-        const main = c.LLVMAddFunction(self.module, "main", main_type);
-
-        const entry = c.LLVMAppendBasicBlock(main, "entry");
-        c.LLVMPositionBuilderAtEnd(self.builder, entry);
-
-        traverseAst(self, ast); // just generate putchar-calls for now
-
-        const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
-
-        _ = c.LLVMBuildRet(self.builder, ret_val);
-    }
-
     // create main function
     fn createFunction(self: *CodeGen, name: []const u8, decl: *Node) !void {
-        // TODO: make 'self' have allocator
+        // TODO: make 'self' have allocator?
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const alloc = gpa.allocator();
 
@@ -198,8 +164,19 @@ pub const CodeGen = struct {
             switch (statement.*) {
                 .function_call => |call| {
                     const putchar_arg = call.func_argument.*;
-                    const putchar_char = putchar_arg.literal.value[1];
-                    createPutcharCall(self, putchar_char);
+                    var putchar_char: u8 = undefined;
+
+                    // TODO: remove hardcoding that the char
+                    // must be a character, not a number, because
+                    // that is currently the assumption
+                    if (putchar_arg.literal.value.len == 3) {
+                        putchar_char = putchar_arg.literal.value[1];
+                        createPutcharCall(self, putchar_char);
+                    } else {
+                        if (std.mem.eql(u8, putchar_arg.literal.value[1..3], "\\n")) {
+                            createPutcharCall(self, '\n');   
+                        }
+                    }
                 },
                 else => {},
             }

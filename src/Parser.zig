@@ -18,6 +18,8 @@ const Error = error{
 pub const Type = union(enum) {
     c_int,
     void,
+    u8,
+    str: []const u8,
 };
 
 pub const Node = union(enum) {
