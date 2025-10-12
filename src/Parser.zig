@@ -1,8 +1,3 @@
-// README:
-// this parser is only intended to handle a 'putchar()' call
-// also the debug prints are for printing the identifier name and
-// argument literal since the AST print doesn't want to print those out
-
 const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig");
 const main = @import("main.zig");
@@ -135,7 +130,7 @@ pub const Parser = struct {
         advance(self); // eat left brace
         
         while (self.tokens.items[self.current].token_type != .RETURN) {
-            // assumption that we only have putchar-calls
+            // assumption that we only have function calls
             const current = try functionCall(self);
             const current_ptr = try self.allocator.create(Node);
             current_ptr.* = current;

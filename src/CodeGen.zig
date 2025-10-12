@@ -45,10 +45,6 @@ pub const CodeGen = struct {
     }
 
     pub fn compile(self: *CodeGen, ast: Node) !void {
-        //declareFunctions(self);
-        // README: the ast is traversed in createMain()
-        //createMain(self, ast);
-        // new:
         try generateProgramCode(self, ast);
 
         c.LLVMInitializeAllTargetInfos();
@@ -100,11 +96,6 @@ pub const CodeGen = struct {
         c.LLVMDisposeTargetMachine(target_machine);
 
         c.LLVMDumpModule(self.module);
-    }
-
-    // TODO: remove
-    fn declareFunctions(self: *CodeGen) void {
-        declarePutchar(self);
     }
 
     fn generateProgramCode(self: *CodeGen, ast: Node) !void {
@@ -163,17 +154,26 @@ pub const CodeGen = struct {
         for (decl.*.function_decl.body.items) |statement| {
             switch (statement.*) {
                 .function_call => |call| {
-                    const putchar_arg = call.func_argument.*;
+                    const arg = call.func_argument.*;
                     var putchar_char: u8 = undefined;
+                    
+                    const func_ident = call.func_identifier.*;
+                    if (std.mem.eql(u8, func_ident.identifier.name, "println")) {
+                        for (0..arg.literal.value.len) |i| {
+                            if (i == 0 or i == arg.literal.value.len - 1) continue;
+                            createPutcharCall(self, arg.literal.value[i]);
+                        }
+                        createPutcharCall(self, '\n');
+                    }
 
                     // TODO: remove hardcoding that the char
                     // must be a character, not a number, because
                     // that is currently the assumption
-                    if (putchar_arg.literal.value.len == 3) {
-                        putchar_char = putchar_arg.literal.value[1];
+                    if (arg.literal.value.len == 3) {
+                        putchar_char = arg.literal.value[1];
                         createPutcharCall(self, putchar_char);
                     } else {
-                        if (std.mem.eql(u8, putchar_arg.literal.value[1..3], "\\n")) {
+                        if (std.mem.eql(u8, arg.literal.value[1..3], "\\n")) {
                             createPutcharCall(self, '\n');   
                         }
                     }
