@@ -1,5 +1,6 @@
 const std = @import("std");
 const main = @import("main.zig");
+const print = std.debug.print;
 
 pub const TokenType = enum {
     LEFT_PAREN,
@@ -95,14 +96,9 @@ pub const TokenType = enum {
 pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
+    line: i32,
+    col: i32,
 };
-
-fn token(token_type: TokenType, lexeme: []const u8) Token {
-    return Token{
-        .token_type = token_type,
-        .lexeme = lexeme,
-    };
-}
 
 fn initTokens() std.array_list.Aligned(Token, null) {
     const tokens_list: std.array_list.Aligned(Token, null) = .empty;
@@ -165,11 +161,19 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     return keywords;
 }
 
+const Error = error{
+    SemicolonNotAtEOL,
+    WrongCharacter,
+};
+
+// TODO: maybe change what character 'current' is, so that it's the
+// one we're actually looking at?
 pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
     current: usize,
     line: i32,
+    col: i32,
     keywords: std.StringHashMap(TokenType),
     tokens: std.array_list.Aligned(Token, null),
 
@@ -179,6 +183,7 @@ pub const Tokenizer = struct {
             .start = 0,
             .current = 0,
             .line = 1,
+            .col = 1,
             .keywords = try initKeywords(allocator),
             .tokens = initTokens(),
         };
@@ -190,23 +195,51 @@ pub const Tokenizer = struct {
 
     pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) !std.array_list.Aligned(Token, null) {
         while (!isAtEnd(self)) {
+            try checkErrors(self);
             self.start = self.current;
             try getToken(self, allocator);
         }
 
-        // no EOF token anymore
         return self.tokens;
+    }
+
+    fn checkErrors(self: *Tokenizer) !void {
+        const char = currentChar(self);
+        //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
+
+        switch (char) {
+            '\n' => {
+                if (try prevChar(self) != ' ' and
+                try prevChar(self) != ';' and
+                try prevChar(self) != '{' and
+                try prevChar(self) != '}' and
+                try prevChar(self) != '\n') {
+                    print("{d}:{d} | ", .{self.line, self.col});
+                    return Error.WrongCharacter;   
+                }
+            },
+            ';' => {
+                if (try nextChar(self) != '\n') return Error.SemicolonNotAtEOL;
+            },
+            else => {},
+        }
     }
 
     fn addToken(self: *Tokenizer, token_type: TokenType, allocator: std.mem.Allocator) !void {
         const text = self.source[self.start..self.current];
         const token_value = try allocator.dupe(u8, text);
         
-        try self.tokens.append(allocator, Token{ .lexeme = token_value, .token_type = token_type });
+        try self.tokens.append(allocator, Token{
+            .lexeme = token_value,
+            .token_type = token_type,
+            .line = self.line,
+            // get col info from start of token
+            .col = self.col - @as(i32, @intCast(text.len)),
+         });
     }
 
     fn getToken(self: *Tokenizer, alloc: std.mem.Allocator) !void {
-        const char = advanceGetChar(self);
+        const char = getCharAdvance(self);
 
         switch (char) {
             '(' => try addToken(self, .LEFT_PAREN, alloc),
@@ -229,7 +262,15 @@ pub const Tokenizer = struct {
             ';' => try addToken(self, .SEMICOLON, alloc),
             '/' => {
                 if (peek(self) == '*') {
-                    while (peek(self) != '*' or peekNext(self) != '/') advance(self);
+                    while (peek(self) != '*' or peekNext(self) != '/') {
+                        if (peek(self) == '\n') {
+                            advance(self);
+                            advance(self);
+                            self.line += 1;
+                            resetCol(self);
+                        }
+                        advance(self);
+                    }
 
                     advance(self);
                     advance(self);
@@ -250,7 +291,10 @@ pub const Tokenizer = struct {
 
             ' ', '\t', '\r' => {},
 
-            '\n' => self.line += 1,
+            '\n' => {
+                self.line += 1;
+                resetCol(self);
+            },
 
             '"' => try string(self, alloc),
             '\'' => try character(self, alloc),
@@ -276,13 +320,37 @@ pub const Tokenizer = struct {
 
     fn string(self: *Tokenizer, alloc: std.mem.Allocator) !void {
         while (peek(self) != '"' and !isAtEnd(self)) {
-            if (peek(self) == '\n') self.line += 1;
+            if (peek(self) == '\n') {
+                self.line += 1;
+                resetCol(self);
+            }
             advance(self);
         }
 
         advance(self);
 
         try addToken(self, .STRING, alloc);
+    }
+
+    // this seems to do the same as peek() on the surface,
+    // but this is used in a context where the current char
+    // we're looking at is actually the current char,
+    // we haven't actually advanced past the current char,
+    // unlike with peek() we actually have, but not in the
+    // peek()-function itself. but really the only difference
+    // are the names. same with nextChar and peekNext
+    fn currentChar(self: *Tokenizer) u8 {
+        return self.source[self.current];
+    }
+
+    fn nextChar(self: *Tokenizer) !u8 {
+        if (isAtEnd(self)) return Error.WrongCharacter;
+        return self.source[self.current + 1];
+    }
+
+    fn prevChar(self: *Tokenizer) !u8 {
+        if (isAtStart(self)) return Error.WrongCharacter;
+        return self.source[self.current - 1];
     }
 
     fn peek(self: *Tokenizer) u8 {
@@ -294,13 +362,23 @@ pub const Tokenizer = struct {
         return self.current >= self.source.len;
     }
 
-    fn advance(self: *Tokenizer) void {
-        self.current += 1;
+    fn isAtStart(self: *Tokenizer) bool {
+        return self.current == 0;
     }
 
-    fn advanceGetChar(self: *Tokenizer) u8 {
+    fn advance(self: *Tokenizer) void {
+        self.current += 1;
+        self.col += 1;
+    }
+
+    fn resetCol(self: *Tokenizer) void {
+        self.col = 1;
+    }
+
+    fn getCharAdvance(self: *Tokenizer) u8 {
         const char = self.source[self.current];
         self.current += 1;
+        self.col += 1;
         return char;
     }
 

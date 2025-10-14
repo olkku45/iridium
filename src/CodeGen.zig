@@ -2,17 +2,10 @@ const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
 const Node = @import("Parser.zig").Node;
 const Type = @import("Parser.zig").Type;
+const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
-
-const c = @cImport({
-    @cInclude("llvm-c/Core.h");
-    @cInclude("llvm-c/ExecutionEngine.h");
-    @cInclude("llvm-c/Target.h");
-    @cInclude("llvm-c/Analysis.h");
-    @cInclude("llvm-c/BitWriter.h");
-});
 
 const CodeGenError = error{
     NotPutChar,
@@ -158,6 +151,8 @@ pub const CodeGen = struct {
                     var putchar_char: u8 = undefined;
                     
                     const func_ident = call.func_identifier.*;
+
+                    // println-thing
                     if (std.mem.eql(u8, func_ident.identifier.name, "println")) {
                         for (0..arg.literal.value.len) |i| {
                             if (i == 0 or i == arg.literal.value.len - 1) continue;

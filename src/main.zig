@@ -2,6 +2,7 @@ const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig").Tokenizer;
 const Token = @import("Tokenizer.zig").Token;
 const Parser = @import("Parser.zig").Parser;
+const Analyzer = @import("Analyzer.zig").Analyzer;
 const CodeGen = @import("CodeGen.zig").CodeGen;
 
 const print = std.debug.print;
@@ -38,19 +39,24 @@ pub fn main() !void {
     var line_tokens = try tokenizer.getTokens(allocator);
 
     for (line_tokens.items) |token| {
+        print("{any}\n", .{token});
         try tokens_list.append(allocator, token);
     }
            
     var parser = Parser.init(tokens_list, allocator);
     const ast = try parser.parseProgram();
+    //print("{any}\n", .{ast});
 
-    var code_gen = CodeGen.init();
-    try code_gen.compile(ast);
+    var analyzer = try Analyzer.init(ast, allocator);
+    _ = try analyzer.analyzeAst();
+
+    //var code_gen = CodeGen.init();
+    //try code_gen.compile(ast);
 
     tokenizer.deinit();
     line_tokens.deinit(allocator);
     parser.deinit();
-    code_gen.deinit();
+    //code_gen.deinit();
 }
 
 pub fn reportError(line: i32, where: []const u8, message: []const u8) void {

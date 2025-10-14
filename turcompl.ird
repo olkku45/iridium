@@ -1,0 +1,6 @@
+fn main() -> c_int {
+	let mut x: c_int = 48;
+	return 0;
+}
+
+x = 1;
