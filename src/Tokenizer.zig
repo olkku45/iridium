@@ -208,6 +208,7 @@ pub const Tokenizer = struct {
         //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
 
         switch (char) {
+            // TODO: switch to parser, when we eat token we check what that is
             '\n' => {
                 if (try prevChar(self) != ' ' and
                 try prevChar(self) != ';' and

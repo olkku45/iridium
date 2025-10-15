@@ -104,8 +104,10 @@ pub const AstPrinter = struct {
         for (ast.items) |node| {
             traverseNode(node.*);
         }
+        print("\n", .{});
     }
 
+    // TODO: consider indentations
     fn traverseNode(node: Node) void {
         switch (node) {
             .extern_fn_decl => {},
@@ -448,7 +450,8 @@ pub const Parser = struct {
     }
 
     // TODO: add token type to advance so we can check
-    // correct type, maybe?
+    // correct type. or some parameter to give to it,
+    // for better errors and better code readability
     fn advance(self: *Parser) void {
         self.current += 1;
     }

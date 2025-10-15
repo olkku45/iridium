@@ -39,7 +39,7 @@ pub fn main() !void {
     var line_tokens = try tokenizer.getTokens(allocator);
 
     for (line_tokens.items) |token| {
-        print("{any}\n", .{token});
+        //print("{any}\n", .{token});
         try tokens_list.append(allocator, token);
     }
            
@@ -48,15 +48,15 @@ pub fn main() !void {
     //print("{any}\n", .{ast});
 
     var analyzer = try Analyzer.init(ast, allocator);
-    _ = try analyzer.analyzeAst();
+    const analyzed = try analyzer.analyzeAst();
 
-    //var code_gen = CodeGen.init();
-    //try code_gen.compile(ast);
+    var code_gen = CodeGen.init(allocator);
+    try code_gen.compile(analyzed);
 
     tokenizer.deinit();
     line_tokens.deinit(allocator);
     parser.deinit();
-    //code_gen.deinit();
+    code_gen.deinit();
 }
 
 pub fn reportError(line: i32, where: []const u8, message: []const u8) void {
