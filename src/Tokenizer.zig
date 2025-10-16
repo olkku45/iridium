@@ -2,7 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 const print = std.debug.print;
 
-pub const TokenTypeTTT = enum {
+pub const TokenType = enum {
     LEFT_PAREN,
     RIGHT_PAREN,
     LEFT_BRACKET,
@@ -35,9 +35,9 @@ pub const TokenTypeTTT = enum {
     SLASH_EQUAL,
 
     RIGHT_ARROW,
-
     AND,
     OR,
+    
     UINT8,
     UINT16,
     UINT32,
@@ -74,7 +74,7 @@ pub const TokenTypeTTT = enum {
     UNION,
     CONTINUE,
     BREAK,
-    MATCH,
+    SWITCH,
     IF,
     ELSE,
     STD,
@@ -89,104 +89,120 @@ pub const TokenTypeTTT = enum {
     AS,
     TRY,
     PUB,
+
+    pub fn isKeyword(self: TokenType) bool {
+        return switch (self) {
+            .USE,
+            .LET,
+            .MUT,
+            .CONST,
+            .GLOBAL,
+            .FN,
+            .FOR,
+            .WHILE,
+            .RETURN,
+            .STRUCT,
+            .ENUM,
+            .UNION,
+            .CONTINUE,
+            .BREAK,
+            .SWITCH,
+            .IF,
+            .ELSE,
+            .STD,
+            .LIB,
+            .EXTERN,
+            .CATCH,
+            .ASSERT,
+            .SUPPRESS,
+            .EXCLUDE,
+            .THROW,
+            .IN,
+            .AS
+            .TRY,
+            .PUB,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isOperator(self: TokenType) bool {
+        return switch (self) {
+            .MINUS,
+            .PLUS,
+            .SLASH,
+            .STAR,
+            .QUERY,
+            .BANG,
+            .BANG_EQUAL,
+            .EQUAL,
+            .EQUAL_EQUAL,
+            .GREATER,
+            .GREATER_EQUAL,
+            .LESS,
+            .LESS_EQUAL,
+            .PLUS_EQUAL,
+            .MINUS_EQUAL,
+            .STAR_EQUAL,
+            .SLASH_EQUAL,
+            .RIGHT_ARROW,
+            .AND,
+            .OR,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isType(self: TokenType) bool {
+        return switch (self) {
+            .UINT8,
+            .UINT16,
+            .UINT32,
+            .UINT64,
+            .INT8,
+            .INT16,
+            .INT32,
+            .INT64,
+            .FLOAT32,
+            .FLOAT64,
+            .BOOL,
+            .VOID,
+            .STRING,
+            .CHARACTER,
+            .C_INT,
+            .C_FLOAT,
+            .C_DOUBLE,
+            .C_CHAR,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isIdentifier(self: TokenType) bool {
+        return switch (self) {
+            .IDENTIFIER => true,
+            else => false,    
+        };
+    }
+
+    pub fn isCharacter(self: TokenType) bool {
+        return switch (self) {
+            .LEFT_PAREN,
+            .RIGHT_PAREN,
+            .LEFT_BRACKET,
+            .RIGHT_BRACKET,
+            .LEFT_BRACE,
+            .RIGHT_BRACE,
+            .COMMA,
+            .DOT,
+            .COLON,
+            .SEMICOLON,
+            => true,
+            else => false,
+        };
+    }
 };
 
-pub const TokenType = union(enum) {
-    pub const Char = enum {
-        LEFT_PAREN,
-        RIGHT_PAREN,
-        LEFT_BRACKET,
-        RIGHT_BRACKET,
-        LEFT_BRACE,
-        RIGHT_BRACE,
-        COMMA,
-        DOT,
-        COLON,
-        SEMICOLON,
-    };
-
-    pub const Operator = enum {
-        PLUS,
-        MINUS,
-        STAR,
-        SLASH,
-        QUERY,
-        BANG,
-        BANG_EQUAL,
-        EQUAL,
-        EQUAL_EQUAL,
-        LESS,
-        LESS_EQUAL,
-        GREATER,
-        GREATER_EQUAL,
-        PLUS_EQUAL,
-        MINUS_EQUAL,
-        STAR_EQUAL,
-        SLASH_EQUAL,
-        RIGHT_ARROW,
-        AND,
-        OR,
-    };
-
-    pub const Type = enum {
-        UINT8,
-        UINT16,
-        UINT32,
-        UINT64,
-        INT8,
-        INT16,
-        INT32,
-        INT64,
-        FLOAT32,
-        FLOAT64,
-        BOOL,
-        VOID,
-        STRING,
-        CHARACTER, // is this necessary because we have UINT8?
-        C_INT,
-        C_FLOAT,
-        C_DOUBLE,
-        C_CHAR,
-    };
-
-    pub const Keyword = enum {
-        USE,
-        LET,
-        MUT,
-        CONST,
-        GLOBAL,
-        FN,
-        FOR,
-        WHILE,
-        RETURN,
-        STRUCT,
-        ENUM,
-        UNION,
-        CONTINUE,
-        BREAK,
-        MATCH,
-        IF,
-        ELSE,
-        STD,
-        LIB,
-        EXTERN,
-        CATCH,
-        ASSERT,
-        SUPPRESS,
-        EXCLUDE,
-        THROW,
-        IN,
-        AS,
-        TRY,
-        PUB,
-    };
-
-    pub const Special = enum {
-        IDENTIFIER,
-    };
-};
-
-// TODO: rework how the token types work in the tokenizer here
 pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
