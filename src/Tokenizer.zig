@@ -2,7 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 const print = std.debug.print;
 
-pub const TokenType = enum {
+pub const TokenTypeTTT = enum {
     LEFT_PAREN,
     RIGHT_PAREN,
     LEFT_BRACKET,
@@ -89,10 +89,104 @@ pub const TokenType = enum {
     AS,
     TRY,
     PUB,
-
-    EOF
 };
 
+pub const TokenType = union(enum) {
+    pub const Char = enum {
+        LEFT_PAREN,
+        RIGHT_PAREN,
+        LEFT_BRACKET,
+        RIGHT_BRACKET,
+        LEFT_BRACE,
+        RIGHT_BRACE,
+        COMMA,
+        DOT,
+        COLON,
+        SEMICOLON,
+    };
+
+    pub const Operator = enum {
+        PLUS,
+        MINUS,
+        STAR,
+        SLASH,
+        QUERY,
+        BANG,
+        BANG_EQUAL,
+        EQUAL,
+        EQUAL_EQUAL,
+        LESS,
+        LESS_EQUAL,
+        GREATER,
+        GREATER_EQUAL,
+        PLUS_EQUAL,
+        MINUS_EQUAL,
+        STAR_EQUAL,
+        SLASH_EQUAL,
+        RIGHT_ARROW,
+        AND,
+        OR,
+    };
+
+    pub const Type = enum {
+        UINT8,
+        UINT16,
+        UINT32,
+        UINT64,
+        INT8,
+        INT16,
+        INT32,
+        INT64,
+        FLOAT32,
+        FLOAT64,
+        BOOL,
+        VOID,
+        STRING,
+        CHARACTER, // is this necessary because we have UINT8?
+        C_INT,
+        C_FLOAT,
+        C_DOUBLE,
+        C_CHAR,
+    };
+
+    pub const Keyword = enum {
+        USE,
+        LET,
+        MUT,
+        CONST,
+        GLOBAL,
+        FN,
+        FOR,
+        WHILE,
+        RETURN,
+        STRUCT,
+        ENUM,
+        UNION,
+        CONTINUE,
+        BREAK,
+        MATCH,
+        IF,
+        ELSE,
+        STD,
+        LIB,
+        EXTERN,
+        CATCH,
+        ASSERT,
+        SUPPRESS,
+        EXCLUDE,
+        THROW,
+        IN,
+        AS,
+        TRY,
+        PUB,
+    };
+
+    pub const Special = enum {
+        IDENTIFIER,
+    };
+};
+
+// TODO: rework how the token types work in the tokenizer here
 pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
@@ -172,7 +266,7 @@ pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
     current: usize,
-    line: i32,
+    line: i32, // do we need these here
     col: i32,
     keywords: std.StringHashMap(TokenType),
     tokens: std.array_list.Aligned(Token, null),
@@ -193,14 +287,14 @@ pub const Tokenizer = struct {
         self.keywords.deinit();
     }
 
-    pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) !std.array_list.Aligned(Token, null) {
+    pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
         while (!isAtEnd(self)) {
             try checkErrors(self);
             self.start = self.current;
             try getToken(self, allocator);
         }
 
-        return self.tokens;
+        return self.tokens.toOwnedSlice(allocator);
     }
 
     fn checkErrors(self: *Tokenizer) !void {
@@ -214,7 +308,8 @@ pub const Tokenizer = struct {
                 try prevChar(self) != ';' and
                 try prevChar(self) != '{' and
                 try prevChar(self) != '}' and
-                try prevChar(self) != '\n') {
+                try prevChar(self) != '\n' and
+                try prevChar(self) != '\t') {
                     print("{d}:{d} | ", .{self.line, self.col});
                     return Error.WrongCharacter;   
                 }
