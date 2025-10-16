@@ -14,6 +14,7 @@ const print = std.debug.print;
 
 const ParseError = error{
     WrongToken,
+    MultiLineVarDecl,
 };
 
 pub const Error = struct {
@@ -25,7 +26,7 @@ pub const Span = struct {
     start_col: usize,
     end_line: usize,
     end_col: usize,
-    source_file: []const u8,  
+    source_file: ?[]const u8,  
 };
 
 pub const BinaryOp = enum {
@@ -62,10 +63,10 @@ pub const Type = union(enum) {
 };
 
 pub const Stmt = union(enum) {
-    if_stmt: *IfStmt,
-    extern_fn_decl: *ExternFnDecl,
-    fn_decl: *FnDecl,
-    var_decl: *VariableDecl,
+    if_stmt: IfStmt,
+    extern_fn_decl: ExternFnDecl,
+    fn_decl: FnDecl,
+    var_decl: VariableDecl,
     expr_stmt: Expr,
 
     pub const IfStmt = struct {
@@ -85,8 +86,8 @@ pub const Stmt = union(enum) {
     pub const FnDecl = struct {
         name: Expr,
         fn_body: []Stmt,
-        //params:
-        //ret_type:
+        //params: , COMING SOON!!!
+        ret_type: Type,
 
         symbol: ?*Symbol,
     };
@@ -183,24 +184,182 @@ pub const Parser = struct {
             .EXTERN => {
                 stmt = try externFnDeclaration(self);
             },
+            .FN => {
+                stmt = try fnDeclaration(self);  
+            },
+            else => {},
         }
     }
 
-    fn externFnDeclaration(self: *Parser) Stmt {
+    fn fnDeclaration(self: *Parser) ![]Stmt {
+        var func_body: std.array_list.Aligned(Stmt, null) = .empty;
+
+        advanceKeyword(self, currToken(self));
+        const func_name = try literal(self);
+
+        advanceCharacter(self, currToken(self));
+        advanceCharacter(self, currToken(self));
+
+        advanceOperator(self, currToken(self));
+        const ret_type = getType(self);
+
+        advanceCharacter(self, currToken(self));
+
+        var curr_type = self.tokens[self.current].token_type;
+
+        while (curr_type != .RETURN) {
+            switch (curr_type) {
+                .LET => {
+                    const var_decl = try variableDecl(self);
+                    try func_body.append(var_decl);
+                },
+                .IF => {
+                    const if_stmt = try ifStmt(self);
+                    try func_body.append(if_stmt);  
+                },
+                .IDENTIFIER => {
+                    const call = try functionCall(self);
+                    try func_body.append(call);
+                },
+                else => {},
+            }
+            curr_type = self.tokens[self.current].token_type;
+        }
+
+        return func_body.toOwnedSlice(self.alloc);
+    }
+
+    // TODO: variable declaration without value
+    
+    fn variableDecl(self: *Parser) !Stmt {
+        var mutable = false;
+
+        const start = currToken(self).col;
+        const line = currToken(self).line;
         
+        try advanceKeyword(self, currToken(self));
+        if (getCurrentTokenType(self) == .MUT) {
+            mutable = true;
+            try advanceKeyword(self, currToken(self));
+        }
+
+        const name = try literal(self);
+        
+        if (getCurrentTokenType(self) != .COLON) {
+            reportParseError(currToken(self));
+            return ParseError.WrongToken; // TODO: add more errors
+        }
+        try advanceCharacter(self, currToken(self));
+        
+        const token_type = getCurrentTokenType(self);
+        var var_type: Type = undefined;
+        switch (token_type) {
+            .C_INT => { var_type = .c_int; },
+            // etc...
+            else => {},
+        }
+
+        try advanceType(self, currToken(self));
+        try advanceOperator(self, currToken(self));
+
+        // currently support only literals for variable assignments
+        const value = try literal(self);
+
+        if (getCurrentTokenType(self) != .SEMICOLON) {
+            reportParseError(currToken(self));
+            return ParseError.WrongToken;
+        }
+
+        const end = currToken(self).col;
+
+        if (currToken(self).line != line) {
+            reportParseError(currToken(self));
+            return ParseError.MultiLineVarDecl;
+        }
+        
+        try advanceCharacter(self, currToken(self));
+
+        return Stmt{ .var_decl = .{
+            .mutable = mutable,
+            .name = name,
+            .value = value,
+            .span = .{
+                .start_col = start,
+                .end_col = end,
+                .start_line = line,
+                .end_line = line,
+                // null because currently we only have one file
+                .source_file = null, 
+            },
+        }};
+    }
+
+    fn externFnDeclaration(self: *Parser) !Stmt {
+        try advanceKeyword(self, currToken(self));
+        try advanceKeyword(self, currToken(self));
+
+        const ident = try literal(self);
+        try advanceCharacter(self, currToken(self));
+
+        const arg_type = try getType(self);
+        try advanceCharacter(self, currToken(self));
+        try advanceOperator(self, currToken(self));
+
+        const ret_type = try getType(self);
+        try advanceCharacter(self, currToken(self));
+
+        return Stmt{ .extern_fn_decl = .{
+            // WARNING: problem here!!!
+            .name = ident,
+            .arg_type = arg_type,
+            .ret_type = ret_type,
+            .symbol = null,
+        }};
+    }
+
+    fn getType(self: *Parser) !Type {
+        const curr = self.tokens[self.current];
+        if (!TokenType.isType(curr.token_type)) {
+            reportParseError(curr);
+            return ParseError.WrongToken;
+        }
+
+        var curr_type: Type = undefined;
+        switch (curr.token_type) {
+            .C_INT => {
+                curr_type = Type { .c_int };
+            },
+            else => {},
+        }
+        
+        advanceType(self, curr);
+        return curr_type;
+    }
+
+    fn literal(self: *Parser) !Literal {
+        const name = self.tokens[self.current].lexeme;
+        const ident = Literal{ .string = name };
+    
+        try advanceIdentifier(self, currToken(self));
+        return ident;
     }
 
     fn advanceKeyword(self: *Parser, token: Token) !void {
-        if (token.token_type != TokenType.Keyword) {
+        // right now just return early and don't advance
+        if (isAtEnd(self)) return;
+        
+        if (!TokenType.isKeyword(token.token_type)) {
             reportParseError(token);
             return ParseError.WrongToken;
         }
-        checkKeyword(self, token);
+        try checkKeyword(self, token);
         self.current += 1;
     }
 
     fn advanceIdentifier(self: *Parser, token: Token) !void {
-        if (token.token_type != TokenType.Special) {
+        if (isAtEnd(self)) return;
+        
+        if (!TokenType.isIdentifier(token.token_type)) {
             reportParseError(token);
             return ParseError.WrongToken;
         }
@@ -208,7 +367,9 @@ pub const Parser = struct {
     }
 
     fn advanceType(self: *Parser, token: Token) !void {
-        if (token.token_type != TokenType.Type) {
+        if (isAtEnd(self)) return;
+            
+        if (!TokenType.isType(token.token_type)) {
             reportParseError(token);
             return ParseError.WrongToken;
         }
@@ -216,7 +377,9 @@ pub const Parser = struct {
     }
 
     fn advanceOperator(self: *Parser, token: Token) !void {
-        if (token.token_type != TokenType.Operator) {
+        if (isAtEnd(self)) return;
+        
+        if (!TokenType.isOperator(token.token_type)) {
             reportParseError(token);
             return ParseError.WrongToken;
         }
@@ -224,7 +387,9 @@ pub const Parser = struct {
     }
 
     fn advanceCharacter(self: *Parser, token: Token) !void {
-        if (token.token_type != TokenType.Char) {
+        if (isAtEnd(self)) return;
+        
+        if (!TokenType.isCharacter(token.token_type)) {
             reportParseError(token);
             return ParseError.WrongToken;
         }
@@ -232,14 +397,20 @@ pub const Parser = struct {
     }
 
     fn checkKeyword(self: *Parser, token: Token) !void {
-        switch (token.token_type.Keyword) {
+        switch (token.token_type) {
             .EXTERN => {
-                if (nextToken(self).token_type != TokenType.Keyword.FN) {
+                if (nextToken(self).token_type != .FN) {
                     reportParseError(token);
                     return ParseError.WrongToken;
                 }
-            }
+            },
+            // etc...
+            else => {},
         }
+    }
+
+    fn currToken(self: *Parser) !Token {
+        return self.tokens[self.current];
     }
 
     fn nextToken(self: *Parser) !Token {
@@ -259,7 +430,7 @@ pub const Parser = struct {
     }
 
     fn getCurrentTokenType(self: *Parser) TokenType {
-        return self.tokens[self.current];
+        return self.tokens[self.current].token_type;
     }
 
     fn isAtEnd(self: *Parser) bool {
