@@ -140,7 +140,8 @@ pub const Expr = union(enum) {
     };
 };
 
-pub const AstPrinter = struct {
+// TODO: remove and replace with proper ast printer in the separate file
+pub const AstPrinterTT = struct {
     pub fn printAst(ast: []Stmt) void {
         for (0..ast.len) |i| {
             traverseStmt(ast[i]);
@@ -237,8 +238,6 @@ pub const Parser = struct {
         }
         
         const slice = try statements.toOwnedSlice(self.alloc);
-
-        AstPrinter.printAst(slice);
         
         return slice;
     }
