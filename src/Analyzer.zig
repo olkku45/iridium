@@ -95,6 +95,11 @@ pub const Analyzer = struct {
     symbol_table: SymbolTable,
     allocator: std.mem.Allocator,
 
+    pub const Result = struct {
+        ast: Node,
+        symbol_table: SymbolTable,
+    };
+
     pub fn init(ast: Node, allocator: std.mem.Allocator) !Analyzer {
         return Analyzer{
             .ast = ast,
@@ -107,11 +112,15 @@ pub const Analyzer = struct {
         self.ast.deinit(self.allocator);
     }
 
-    pub fn analyzeAst(self: *Analyzer) !Node {
+    pub fn analyzeAst(self: *Analyzer) !Result {
         for (self.ast.program.program_ast.items) |node| {
             try traverseTopNode(self, node.*);
         }
-        return self.ast;
+
+        return Result{
+            .ast = self.ast,
+            .symbol_table = self.symbol_table,
+        };
     }
 
     fn traverseTopNode(self: *Analyzer, node: Node) !void {
@@ -131,9 +140,6 @@ pub const Analyzer = struct {
     fn checkVariableUpdate(self: *Analyzer, node: Node.VariableUpdateNode) !void {
         const variable = self.symbol_table.lookupItem(node.name.*.identifier.name);
         if (variable == null) {
-            //const line = variable.?.token.line;
-            //const col = variable.?.token.col;
-            //print("{d}:{d} | ", .{line, col});
             const line = node.var_token.line;
             const col = node.var_token.col;
             print("{d}:{d} | ", .{line, col});

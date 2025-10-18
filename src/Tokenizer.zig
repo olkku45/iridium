@@ -35,9 +35,9 @@ pub const TokenType = enum {
     SLASH_EQUAL,
 
     RIGHT_ARROW,
-
     AND,
     OR,
+    
     UINT8,
     UINT16,
     UINT32,
@@ -74,7 +74,7 @@ pub const TokenType = enum {
     UNION,
     CONTINUE,
     BREAK,
-    MATCH,
+    SWITCH,
     IF,
     ELSE,
     STD,
@@ -90,7 +90,117 @@ pub const TokenType = enum {
     TRY,
     PUB,
 
-    EOF
+    pub fn isKeyword(self: TokenType) bool {
+        return switch (self) {
+            .USE,
+            .LET,
+            .MUT,
+            .CONST,
+            .GLOBAL,
+            .FN,
+            .FOR,
+            .WHILE,
+            .RETURN,
+            .STRUCT,
+            .ENUM,
+            .UNION,
+            .CONTINUE,
+            .BREAK,
+            .SWITCH,
+            .IF,
+            .ELSE,
+            .STD,
+            .LIB,
+            .EXTERN,
+            .CATCH,
+            .ASSERT,
+            .SUPPRESS,
+            .EXCLUDE,
+            .THROW,
+            .IN,
+            .AS
+            .TRY,
+            .PUB,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isOperator(self: TokenType) bool {
+        return switch (self) {
+            .MINUS,
+            .PLUS,
+            .SLASH,
+            .STAR,
+            .QUERY,
+            .BANG,
+            .BANG_EQUAL,
+            .EQUAL,
+            .EQUAL_EQUAL,
+            .GREATER,
+            .GREATER_EQUAL,
+            .LESS,
+            .LESS_EQUAL,
+            .PLUS_EQUAL,
+            .MINUS_EQUAL,
+            .STAR_EQUAL,
+            .SLASH_EQUAL,
+            .RIGHT_ARROW,
+            .AND,
+            .OR,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isType(self: TokenType) bool {
+        return switch (self) {
+            .UINT8,
+            .UINT16,
+            .UINT32,
+            .UINT64,
+            .INT8,
+            .INT16,
+            .INT32,
+            .INT64,
+            .FLOAT32,
+            .FLOAT64,
+            .BOOL,
+            .VOID,
+            .STRING,
+            .CHARACTER,
+            .C_INT,
+            .C_FLOAT,
+            .C_DOUBLE,
+            .C_CHAR,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isIdentifier(self: TokenType) bool {
+        return switch (self) {
+            .IDENTIFIER => true,
+            else => false,    
+        };
+    }
+
+    pub fn isCharacter(self: TokenType) bool {
+        return switch (self) {
+            .LEFT_PAREN,
+            .RIGHT_PAREN,
+            .LEFT_BRACKET,
+            .RIGHT_BRACKET,
+            .LEFT_BRACE,
+            .RIGHT_BRACE,
+            .COMMA,
+            .DOT,
+            .COLON,
+            .SEMICOLON,
+            => true,
+            else => false,
+        };
+    }
 };
 
 pub const Token = struct {
@@ -172,7 +282,7 @@ pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
     current: usize,
-    line: i32,
+    line: i32, // do we need these here
     col: i32,
     keywords: std.StringHashMap(TokenType),
     tokens: std.array_list.Aligned(Token, null),
@@ -193,14 +303,14 @@ pub const Tokenizer = struct {
         self.keywords.deinit();
     }
 
-    pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) !std.array_list.Aligned(Token, null) {
+    pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
         while (!isAtEnd(self)) {
             try checkErrors(self);
             self.start = self.current;
             try getToken(self, allocator);
         }
 
-        return self.tokens;
+        return self.tokens.toOwnedSlice(allocator);
     }
 
     fn checkErrors(self: *Tokenizer) !void {
@@ -208,12 +318,14 @@ pub const Tokenizer = struct {
         //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
 
         switch (char) {
+            // TODO: switch to parser, when we eat token we check what that is
             '\n' => {
                 if (try prevChar(self) != ' ' and
                 try prevChar(self) != ';' and
                 try prevChar(self) != '{' and
                 try prevChar(self) != '}' and
-                try prevChar(self) != '\n') {
+                try prevChar(self) != '\n' and
+                try prevChar(self) != '\t') {
                     print("{d}:{d} | ", .{self.line, self.col});
                     return Error.WrongCharacter;   
                 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
 const Node = @import("Parser.zig").Node;
 const Type = @import("Parser.zig").Type;
+const Result = @import("Analyzer.zig").Analyzer.Result;
 const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
@@ -18,8 +19,9 @@ pub const CodeGen = struct {
     context: c.LLVMContextRef,
     module: c.LLVMModuleRef,
     builder: c.LLVMBuilderRef,
+    allocator: std.mem.Allocator,
 
-    pub fn init() CodeGen {
+    pub fn init(allocator: std.mem.Allocator) CodeGen {
         const context = c.LLVMContextCreate();
         const module = c.LLVMModuleCreateWithNameInContext("putchar test", context);
         const builder = c.LLVMCreateBuilderInContext(context);
@@ -27,7 +29,8 @@ pub const CodeGen = struct {
         return .{
             .context = context,
             .module = module,
-            .builder = builder, 
+            .builder = builder,
+            .allocator = allocator,
         };
     }
 
@@ -37,8 +40,8 @@ pub const CodeGen = struct {
         c.LLVMContextDispose(self.context);
     }
 
-    pub fn compile(self: *CodeGen, ast: Node) !void {
-        try generateProgramCode(self, ast);
+    pub fn compile(self: *CodeGen, res: Result) !void {
+        try generateProgramCode(self, res);
 
         c.LLVMInitializeAllTargetInfos();
         c.LLVMInitializeAllTargets();
@@ -91,7 +94,8 @@ pub const CodeGen = struct {
         c.LLVMDumpModule(self.module);
     }
 
-    fn generateProgramCode(self: *CodeGen, ast: Node) !void {
+    fn generateProgramCode(self: *CodeGen, analyzed: Result) !void {
+        const ast = analyzed.ast;
         for (ast.program.program_ast.items) |node_ptr| {
             switch (node_ptr.*) {
                 .extern_fn_decl => {
@@ -130,13 +134,9 @@ pub const CodeGen = struct {
 
     // create main function
     fn createFunction(self: *CodeGen, name: []const u8, decl: *Node) !void {
-        // TODO: make 'self' have allocator?
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const alloc = gpa.allocator();
-
-        // add null termination
-        const name_copy = try std.fmt.allocPrint(alloc, "{s}", .{name});
-        defer alloc.free(name_copy);
+        // string to memory
+        var buf: [200]u8 = undefined;
+        const name_copy = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
         
         const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), null, 0, 0);
         const func = c.LLVMAddFunction(self.module, name_copy.ptr, func_type);
@@ -173,12 +173,33 @@ pub const CodeGen = struct {
                         }
                     }
                 },
+                .variable_decl => |var_decl| {
+                    try createVariableDecl(self, var_decl);
+                },
                 else => {},
             }
         } 
 
         const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
-
         _ = c.LLVMBuildRet(self.builder, ret_val);
+    }
+
+    fn createVariableDecl(self: *CodeGen, decl: Node.VariableDeclarationNode) !void {
+        const name = decl.name.*.identifier.name;
+        const var_type = decl.type;
+
+        var ir_type: c.LLVMTypeRef = undefined;
+        switch (var_type) {
+            .c_int => {
+                ir_type = c.LLVMInt32Type();
+            },
+            else => {},
+        }
+
+        // LLVM requires a null-terminated string
+        var buf: [200]u8 = undefined;
+        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
+
+        _ = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
     }
 };

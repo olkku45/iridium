@@ -1,6 +1,13 @@
-fn main() -> c_int {
-	let mut x: c_int = 48;
-	return 0;
-}
+fn main () -> i32 {
+	let x: i32 = 0;
 
-x = 1;
+	while (true) {
+		if (x == 48) {
+			break;
+		} else {
+			println("x < 48");
+		}
+
+		x += 1;
+	}
+}
