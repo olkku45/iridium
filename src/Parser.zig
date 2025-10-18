@@ -1,7 +1,3 @@
-// TODO:
-// 1. break up Node union
-// 2. have nodes store location info (token span) instead of full token
-
 const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig");
 const Symbol = @import("Analyzer.zig").Symbol;
@@ -238,7 +234,6 @@ pub const Parser = struct {
         while (!isAtEnd(self)) {
             const stmt = try parseStatement(self);
             try statements.append(self.alloc, stmt);
-            //print("current token index: {d}\n", .{self.current});
         }
         
         const slice = try statements.toOwnedSlice(self.alloc);
@@ -251,8 +246,6 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) anyerror!Stmt {
         const curr_token_type = getCurrentTokenType(self);
         var stmt: Stmt = undefined;
-
-        //print("tokens len: {d}", .{self.tokens.len});
 
         switch (curr_token_type) {
             .EXTERN => {
