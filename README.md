@@ -34,3 +34,5 @@ this project are:
 - working on the standard library
 
 - LSP and editor integration
+
+... and all other kinds of stuff that are necessary.

@@ -2,6 +2,7 @@ const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig");
 const Symbol = @import("Analyzer.zig").Symbol;
 const SymbolTable = @import("Analyzer.zig").SymbolTable;
+const Span = @import("main.zig").Span;
 
 const Token = Tokenizer.Token;
 const TokenType = Tokenizer.TokenType;
@@ -14,13 +15,7 @@ const ParseError = error{
     WrongTokenType,
     MultiLineVarDecl,
     UnexpectedEOF,
-};
-
-pub const Span = struct {
-    line: usize,
-    start_col: usize,
-    end_col: usize,
-    source_file: ?[]const u8,  
+    SomethingWentWrong,
 };
 
 pub const BinaryOp = enum {
@@ -46,9 +41,36 @@ pub const UnaryOp = enum {
     NOT,  
 };
 
-// TODO: switch to type interning in the future
+// TODO: move this to analyzer? would make more sense probably
 pub const TypeAnnotation = union(enum) {
-    primitive: []const u8,  
+    named: NamedType,
+    function: FunctionType,
+
+    pub const NamedType = union(enum) {
+        primitive: PrimitiveType,
+        // user_defined: []const u8,  coming soon
+
+        pub const PrimitiveType = enum {
+            i8,
+            i16,
+            i32,
+            i64,
+            u8,
+            u16,
+            u32,
+            u64,
+            f32,
+            f64,
+            bool,
+            void,
+            c_int,
+        };
+    };
+
+    pub const FunctionType = union(enum) {
+        params: []TypeAnnotation,
+        return_type: *TypeAnnotation,
+    };
 };
 
 pub const Stmt = union(enum) {
@@ -94,7 +116,7 @@ pub const Stmt = union(enum) {
     };
 
     pub const RetStmt = struct {
-        value: Expr,   
+        value: Expr,
     };
 };
 
@@ -137,7 +159,15 @@ pub const Expr = union(enum) {
     pub const Literal = struct {
         value: []const u8,
         span: Span,
+        type: LiteralType,
+        annotation: ?TypeAnnotation,
     };
+};
+
+pub const LiteralType = enum {
+    variable,
+    function,
+    primitive,
 };
 
 pub const Parser = struct {
@@ -220,8 +250,9 @@ pub const Parser = struct {
         try advanceKeyword(self, currToken(self));
 
         try self.expect(.IDENTIFIER);
-        const func_name = try literal(self);
+        const func_name = try literalWithType(self, .function);
 
+        // no args for now
         try self.expect(.LEFT_PAREN);
         try advanceCharacter(self, currToken(self));
         try self.expect(.RIGHT_PAREN);
@@ -229,24 +260,19 @@ pub const Parser = struct {
 
         try self.expect(.RIGHT_ARROW);
         try advanceOperator(self, currToken(self));
+
         const ret_type = try getType(self);
+        try advanceType(self, currToken(self));
 
         const func_body = try parseBlock(self);
 
         // TODO: loop over stmts to see if there's a return stmt,
-        // if not return error
+        // if not return error, or some other way to check for a
+        // return statement...
         
         return Stmt{ .fn_decl = .{
             .fn_body = func_body,
-            .name = Expr{ .literal = .{
-                .value = func_name.literal.value,
-                .span = Span{
-                    .start_col = func_name.literal.span.start_col,
-                    .end_col = func_name.literal.span.end_col,
-                    .line = func_name.literal.span.line,
-                    .source_file = func_name.literal.span.source_file,
-                },
-            }},
+            .name = func_name,
             .ret_type = ret_type,
             .symbol = null,
         }};
@@ -274,8 +300,7 @@ pub const Parser = struct {
     }
 
     fn binaryExpr(self: *Parser) !Expr {
-        const left = currToken(self);
-        try advanceIdentifier(self, currToken(self));
+        const left = try literal(self);
 
         const op = currToken(self);
         try advanceOperator(self, currToken(self));
@@ -300,30 +325,13 @@ pub const Parser = struct {
             else => {},
         }
 
-        const right = currToken(self);
-        try advanceType(self, currToken(self));
+        const right = try literal(self);
 
         const binary = try self.alloc.create(Expr.BinaryExpr);
         binary.* = .{
-            .left = Expr{ .literal = .{
-                .value = left.lexeme,
-                .span = Span{
-                    .start_col = left.span.start_col,
-                    .end_col = left.span.end_col,
-                    .line = left.span.line,
-                    .source_file = left.span.source_file,
-                }
-            }},
+            .left = left,
             .op = bin_op,
-            .right = Expr{ .literal = .{
-                .value = right.lexeme,
-                .span = Span{
-                    .start_col = right.span.start_col,
-                    .end_col = right.span.end_col,
-                    .line = right.span.line,
-                    .source_file = right.span.source_file,
-                }  
-            }},
+            .right = right,
         };
 
         return Expr{ .binary = binary };
@@ -339,20 +347,12 @@ pub const Parser = struct {
         try advanceCharacter(self, currToken(self));
 
         return Stmt{ .ret_stmt = .{
-            .value = Expr{ .literal = .{
-                .value = ret_value.literal.value,
-                .span = Span{
-                    .start_col = ret_value.literal.span.start_col,
-                    .end_col = ret_value.literal.span.end_col,
-                    .line = ret_value.literal.span.line,
-                    .source_file = ret_value.literal.span.source_file,
-                }
-            }}
+            .value = ret_value,
         }};
     }
 
     fn functionCall(self: *Parser) !Stmt {
-        const ident = try literal(self);
+        const ident = try literalWithType(self, .function);
         
         try self.expect(.LEFT_PAREN);
         try advanceCharacter(self, currToken(self));
@@ -365,12 +365,16 @@ pub const Parser = struct {
         while (curr_type != .RIGHT_PAREN) {
             switch (curr_type) {
                 .STRING => {
-                    const str_arg = try literal(self);
+                    const str_arg = try literalWithType(self, .primitive);
                     try args.append(self.alloc, str_arg);
                 },
                 .IDENTIFIER => {
-                    const ident_arg = try literal(self);
+                    const ident_arg = try literalWithType(self, .variable);
                     try args.append(self.alloc, ident_arg);  
+                },
+                .CHARACTER => {
+                    const char_arg = try literalWithType(self, .primitive);
+                    try args.append(self.alloc, char_arg);  
                 },
                 else => {},
             }
@@ -387,6 +391,7 @@ pub const Parser = struct {
 
         const call = try self.alloc.create(Expr.CallExpr);
         call.* = .{
+            // TODO: shorten this
             .func_name = Expr{ .literal = .{
                 .value = ident.literal.value,
                 .span = Span{
@@ -395,6 +400,8 @@ pub const Parser = struct {
                     .end_col = ident.literal.span.end_col,
                     .source_file = ident.literal.span.source_file,
                 },
+                .type = .function,
+                .annotation = null,
             }},
             .args = args_slice,
             .func_symbol = null,
@@ -408,7 +415,7 @@ pub const Parser = struct {
         }};
     }
 
-    // TODO: variable declaration without giving a value
+    // TODO: variable declaration without the value
     
     fn variableDecl(self: *Parser) !Stmt {
         var mutable = false;
@@ -422,13 +429,12 @@ pub const Parser = struct {
             try advanceKeyword(self, currToken(self));
         }
 
-        const var_name = try literal(self);
+        const var_name = try literalWithType(self, .variable);
 
         try self.expect(.COLON);
         try advanceCharacter(self, currToken(self));
         
-        const var_type = TypeAnnotation { .primitive = currToken(self).lexeme };
-
+        const var_type = try getType(self);
         try advanceType(self, currToken(self));
 
         try self.expect(.EQUAL);
@@ -448,15 +454,7 @@ pub const Parser = struct {
 
         return Stmt{ .var_decl = .{
             .mutable = mutable,
-            .name = Expr{ .literal = .{
-                .value = var_name.literal.value,
-                .span = Span{
-                    .line = var_name.literal.span.line,
-                    .start_col = var_name.literal.span.start_col,
-                    .end_col = var_name.literal.span.end_col,
-                    .source_file = null,
-                },
-            }},
+            .name = var_name,
             .value = Expr{ .literal = value.literal },
             .var_type = var_type,
         }};
@@ -468,12 +466,17 @@ pub const Parser = struct {
         try self.expect(.FN);
         try advanceKeyword(self, currToken(self));
 
-        const lit = try literal(self);
+        const lit = try literalWithType(self, .function);
 
         try self.expect(.LEFT_PAREN);
         try advanceCharacter(self, currToken(self));
 
+        try advanceIdentifier(self, currToken(self));
+        try self.expect(.COLON);
+        try advanceCharacter(self, currToken(self));
+
         const arg_type = try getType(self);
+        try advanceType(self, currToken(self));
         
         try self.expect(.RIGHT_PAREN);
         try advanceCharacter(self, currToken(self));
@@ -482,20 +485,13 @@ pub const Parser = struct {
         try advanceOperator(self, currToken(self));
 
         const ret_type = try getType(self);
+        try advanceType(self, currToken(self));
 
         try self.expect(.SEMICOLON);
         try advanceCharacter(self, currToken(self));
 
         return Stmt{ .extern_fn_decl = .{
-            .name = Expr { .literal = .{
-                .value = lit.literal.value,
-                .span = Span{
-                    .start_col = lit.literal.span.start_col,
-                    .end_col = lit.literal.span.end_col,
-                    .line = lit.literal.span.line,
-                    .source_file = lit.literal.span.source_file,
-                },
-            }},
+            .name = lit,
             .arg_type = arg_type,
             .ret_type = ret_type,
             .symbol = null,
@@ -512,22 +508,55 @@ pub const Parser = struct {
         var curr_type: TypeAnnotation = undefined;
         switch (curr.token_type) {
             .C_INT => {
-                curr_type = TypeAnnotation { .primitive = curr.lexeme };
+                curr_type = TypeAnnotation { .named = .{
+                    .primitive = .c_int,
+                }};
             },
+            // etc...
             else => {},
         }
 
-        try advanceType(self, curr);
         return curr_type;
     }
 
-    fn literal(self: *Parser) !Expr {
+    fn getTypeAnnotation(token_type: TokenType) TypeAnnotation {
+        var at: TypeAnnotation.NamedType.PrimitiveType = undefined;
+        
+        switch (token_type) {
+            .UINT8 => { at = .u8; },
+            .UINT16 => { at = .u16; },
+            .UINT32 => { at = .u32; },
+            .UINT64 => { at = .u64; },
+            .INT8 => { at = .i8; },
+            .INT16 => { at = .i16; },
+            .INT32 => { at = .i32; },
+            .INT64 => { at = .i64; },
+            .FLOAT32 => { at = .f32; },
+            .FLOAT64 => { at = .f64; },
+            .BOOL => { at = .bool; },
+            .VOID => { at = .void; },
+            .C_INT => { at = .c_int; },
+            else => {},
+        }
+
+        return TypeAnnotation { .named = .{
+            .primitive = at,
+        }};
+    }
+
+    fn literalWithType(self: *Parser, lit_type: LiteralType) !Expr {
         const curr = currToken(self);
+
+        var annotation: TypeAnnotation = undefined;
         
         if (curr.token_type.category() == .IDENTIFIER) {
             try advanceIdentifier(self, currToken(self));
         } else if (curr.token_type.category() == .TYPE) {
+            annotation = getTypeAnnotation(curr.token_type);
             try advanceType(self, currToken(self));
+        } else {
+            reportParseError(curr);
+            return ParseError.WrongTokenType;
         }
 
         const lit = Expr{ .literal = .{
@@ -537,12 +566,47 @@ pub const Parser = struct {
                 .end_col = curr.span.end_col,
                 .line = curr.span.line,
                 .source_file = null,
-            }
+            },
+            .type = lit_type,
+            .annotation = annotation,
         }};
 
         return lit;
     }
 
+    fn literal(self: *Parser) !Expr {
+        const curr = currToken(self);
+
+        var lit_type: LiteralType = undefined;
+        var annotation: TypeAnnotation = undefined;
+        
+        if (curr.token_type.category() == .IDENTIFIER) {
+            lit_type = .variable;
+            try advanceIdentifier(self, currToken(self));
+        } else if (curr.token_type.category() == .TYPE) {
+            lit_type = .primitive;
+            annotation = getTypeAnnotation(curr.token_type);
+            try advanceType(self, currToken(self));
+        } else {
+            reportParseError(curr);
+            return ParseError.WrongTokenType;
+        }
+
+        const lit = Expr{ .literal = .{
+            .value = curr.lexeme,
+            .span = Span{
+                .start_col = curr.span.start_col,
+                .end_col = curr.span.end_col,
+                .line = curr.span.line,
+                .source_file = null,
+            },
+            .type = lit_type,
+            .annotation = annotation,
+        }};
+
+        return lit;
+    }
+    
     // TODO: collect errors into a list or something, so we can report
     // multiple errors at once
     fn expect(self: *Parser, token_type: TokenType) !void {

@@ -81,13 +81,15 @@ pub const AstPrinter = struct {
         try self.writeIndent();
         try self.writer.writeAll("Arg Type\n");
         self.indent();
-        try self.writer.writeAll(stmt.extern_fn_decl.arg_type.primitive);
+        // cannot print type currently
+        //try self.writer.writeAll(stmt.extern_fn_decl.arg_type.named.primitive);
         self.dedent();
 
         try self.writeIndent();
         try self.writer.writeAll("Return Type\n");
         self.indent();
-        try self.writer.writeAll(stmt.extern_fn_decl.ret_type.primitive);
+        // cannot print type currently
+        //try self.writer.writeAll(stmt.extern_fn_decl.ret_type.named.primitive);
         self.dedent();
     }
 
@@ -101,7 +103,8 @@ pub const AstPrinter = struct {
 
         try self.writeIndent();
         try self.writer.writeAll("Returns: ");
-        try self.writer.writeAll(stmt.fn_decl.ret_type.primitive);
+        // cannot print type currently
+        //try self.writer.writeAll(stmt.fn_decl.ret_type.named.primitive);
         try self.writer.writeByte('\n');
 
         try self.writeIndent();
@@ -126,7 +129,8 @@ pub const AstPrinter = struct {
         try self.writeIndent();
         try self.writer.writeAll("Variable type: ");
         self.indent();
-        try self.writer.writeAll(stmt.var_decl.var_type.primitive);
+        // cannot print type currently
+        //try self.writer.writeAll(stmt.var_decl.var_type.primitive);
         try self.writer.writeByte('\n');
         self.dedent();
 

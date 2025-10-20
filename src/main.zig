@@ -58,17 +58,17 @@ pub fn main() !void {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 
     const stdout = &stdout_writer.interface;
-        
+    
     var printer = AstPrinter.init(stdout);
     try printer.printAst(ast);
 
     try stdout.flush();
 
-    //var analyzer = try Analyzer.init(ast, allocator);
-    //const analyzed = try analyzer.analyzeAst();
+    var analyzer = try Analyzer.init(ast, allocator);
+    const analyzed = try analyzer.analyzeAst();
 
-    //var code_gen = CodeGen.init(allocator);
-    //try code_gen.compile(analyzed);
+    var code_gen = CodeGen.init(allocator);
+    try code_gen.compile(analyzed);
 }
 
 pub fn reportError(line: usize, where: []const u8, message: []const u8) void {

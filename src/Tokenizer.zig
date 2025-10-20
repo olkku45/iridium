@@ -2,6 +2,8 @@ const std = @import("std");
 const main = @import("main.zig");
 const print = std.debug.print;
 
+const Span = @import("main.zig").Span;
+
 pub const TokenType = enum {
     LEFT_PAREN,
     RIGHT_PAREN,
@@ -90,7 +92,15 @@ pub const TokenType = enum {
     TRY,
     PUB,
 
-    pub fn isKeyword(self: TokenType) bool {
+    pub const Category = enum {
+        KEYWORD,
+        OPERATOR,
+        TYPE,
+        CHARACTER,
+        IDENTIFIER,
+    };
+
+    pub fn category(self: TokenType) Category {
         return switch (self) {
             .USE,
             .LET,
@@ -118,16 +128,11 @@ pub const TokenType = enum {
             .EXCLUDE,
             .THROW,
             .IN,
-            .AS
+            .AS,
             .TRY,
             .PUB,
-            => true,
-            else => false,
-        };
-    }
-
-    pub fn isOperator(self: TokenType) bool {
-        return switch (self) {
+            => .KEYWORD,
+            
             .MINUS,
             .PLUS,
             .SLASH,
@@ -148,13 +153,8 @@ pub const TokenType = enum {
             .RIGHT_ARROW,
             .AND,
             .OR,
-            => true,
-            else => false,
-        };
-    }
+            => .OPERATOR,
 
-    pub fn isType(self: TokenType) bool {
-        return switch (self) {
             .UINT8,
             .UINT16,
             .UINT32,
@@ -167,26 +167,16 @@ pub const TokenType = enum {
             .FLOAT64,
             .BOOL,
             .VOID,
+            .INTEGER,
+            .FLOAT,
             .STRING,
             .CHARACTER,
             .C_INT,
             .C_FLOAT,
             .C_DOUBLE,
             .C_CHAR,
-            => true,
-            else => false,
-        };
-    }
+            => .TYPE,
 
-    pub fn isIdentifier(self: TokenType) bool {
-        return switch (self) {
-            .IDENTIFIER => true,
-            else => false,    
-        };
-    }
-
-    pub fn isCharacter(self: TokenType) bool {
-        return switch (self) {
             .LEFT_PAREN,
             .RIGHT_PAREN,
             .LEFT_BRACKET,
@@ -197,8 +187,9 @@ pub const TokenType = enum {
             .DOT,
             .COLON,
             .SEMICOLON,
-            => true,
-            else => false,
+            => .CHARACTER,
+
+            .IDENTIFIER => .IDENTIFIER,
         };
     }
 };
@@ -206,8 +197,7 @@ pub const TokenType = enum {
 pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
-    line: i32,
-    col: i32,
+    span: Span,
 };
 
 fn initTokens() std.array_list.Aligned(Token, null) {
@@ -232,7 +222,7 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     //try keywords.put("union", .UNION);
     try keywords.put("continue", .CONTINUE);
     try keywords.put("BREAK", .BREAK);
-    try keywords.put("match", .MATCH);
+    try keywords.put("switch", .SWITCH);
     try keywords.put("if", .IF);
     try keywords.put("else", .ELSE);
     try keywords.put("std", .STD);
@@ -282,8 +272,8 @@ pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
     current: usize,
-    line: i32, // do we need these here
-    col: i32,
+    line: usize, // do we need these here
+    col: usize,
     keywords: std.StringHashMap(TokenType),
     tokens: std.array_list.Aligned(Token, null),
 
@@ -297,10 +287,6 @@ pub const Tokenizer = struct {
             .keywords = try initKeywords(allocator),
             .tokens = initTokens(),
         };
-    }
-
-    pub fn deinit(self: *Tokenizer) void {
-        self.keywords.deinit();
     }
 
     pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
@@ -344,9 +330,13 @@ pub const Tokenizer = struct {
         try self.tokens.append(allocator, Token{
             .lexeme = token_value,
             .token_type = token_type,
-            .line = self.line,
             // get col info from start of token
-            .col = self.col - @as(i32, @intCast(text.len)),
+            .span = Span{
+                .start_col = self.col - text.len,
+                .end_col = self.col,
+                .line = self.line, // TODO: consider start line and end_line
+                .source_file = null,
+            }
          });
     }
 

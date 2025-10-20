@@ -1,0 +1,13 @@
+fn main () -> i32 {
+	let x: i32 = 0;
+
+	while (true) {
+		if (x == 48) {
+			break;
+		} else {
+			println("x < 48");
+		}
+
+		x += 1;
+	}
+}

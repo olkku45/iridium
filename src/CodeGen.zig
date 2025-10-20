@@ -1,8 +1,8 @@
 const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
-const Node = @import("Parser.zig").Node;
 const Type = @import("Parser.zig").Type;
 const Result = @import("Analyzer.zig").Analyzer.Result;
+const Stmt = @import("Parser.zig").Stmt;
 const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
@@ -96,13 +96,14 @@ pub const CodeGen = struct {
 
     fn generateProgramCode(self: *CodeGen, analyzed: Result) !void {
         const ast = analyzed.ast;
-        for (ast.program.program_ast.items) |node_ptr| {
-            switch (node_ptr.*) {
+    
+        for (ast) |item| {
+            switch (item) {
                 .extern_fn_decl => {
                     declarePutchar(self);
                 },
-                .function_decl => |declaration| {
-                    try createFunction(self, declaration.name, node_ptr);
+                .fn_decl => |declaration| {
+                    try createFunction(self, declaration.name.literal.value, item);  
                 },
                 else => {},
             }
@@ -133,7 +134,7 @@ pub const CodeGen = struct {
     }
 
     // create main function
-    fn createFunction(self: *CodeGen, name: []const u8, decl: *Node) !void {
+    fn createFunction(self: *CodeGen, name: []const u8, decl: Stmt) !void {
         // string to memory
         var buf: [200]u8 = undefined;
         const name_copy = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
@@ -144,16 +145,16 @@ pub const CodeGen = struct {
         const block = c.LLVMAppendBasicBlock(func, "block");
         c.LLVMPositionBuilderAtEnd(self.builder, block);
 
-        for (decl.*.function_decl.body.items) |statement| {
-            switch (statement.*) {
-                .function_call => |call| {
-                    const arg = call.func_argument.*;
+        for (decl.fn_decl.fn_body) |stmt| {
+            switch (stmt) {
+                .expr_stmt => |s| {
+                    const call = s.expr.func_call.*;
+                    const arg = call.args[0];
                     var putchar_char: u8 = undefined;
-                    
-                    const func_ident = call.func_identifier.*;
 
-                    // println-thing
-                    if (std.mem.eql(u8, func_ident.identifier.name, "println")) {
+                    const func_ident = call.func_name.literal.value;
+
+                    if (std.mem.eql(u8, func_ident, "println")) {
                         for (0..arg.literal.value.len) |i| {
                             if (i == 0 or i == arg.literal.value.len - 1) continue;
                             createPutcharCall(self, arg.literal.value[i]);
@@ -161,32 +162,30 @@ pub const CodeGen = struct {
                         createPutcharCall(self, '\n');
                     }
 
-                    // TODO: remove hardcoding that the char
-                    // must be a character, not a number, because
-                    // that is currently the assumption
+                    // TODO: remove hardcoding that char must be character, not number
                     if (arg.literal.value.len == 3) {
                         putchar_char = arg.literal.value[1];
                         createPutcharCall(self, putchar_char);
                     } else {
                         if (std.mem.eql(u8, arg.literal.value[1..3], "\\n")) {
-                            createPutcharCall(self, '\n');   
+                            createPutcharCall(self, '\n');
                         }
                     }
                 },
-                .variable_decl => |var_decl| {
-                    try createVariableDecl(self, var_decl);
+                .var_decl => |var_decl| {
+                    try createVariableDecl(self, var_decl);  
                 },
                 else => {},
             }
-        } 
+        }
 
         const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
         _ = c.LLVMBuildRet(self.builder, ret_val);
     }
 
-    fn createVariableDecl(self: *CodeGen, decl: Node.VariableDeclarationNode) !void {
-        const name = decl.name.*.identifier.name;
-        const var_type = decl.type;
+    fn createVariableDecl(self: *CodeGen, decl: Stmt.VariableDecl) !void {
+        const name = decl.name.literal.value;
+        const var_type = decl.var_type.named.primitive;
 
         var ir_type: c.LLVMTypeRef = undefined;
         switch (var_type) {
