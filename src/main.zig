@@ -69,6 +69,8 @@ pub fn main() !void {
 
     var code_gen = CodeGen.init(allocator);
     try code_gen.compile(analyzed);
+
+    code_gen.deinit();
 }
 
 pub fn reportError(line: usize, where: []const u8, message: []const u8) void {

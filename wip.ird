@@ -1,9 +1,0 @@
-fn main() -> c_int {
-	let mut x: c_int = 48;
-
-	if (x > 0) {
-		println("x is greater than zero.");
-	}
-	
-	return 0;
-}

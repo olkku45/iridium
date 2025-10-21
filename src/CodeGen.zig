@@ -3,6 +3,7 @@ const Parser = @import("Parser.zig").Parser;
 const Type = @import("Parser.zig").Type;
 const Result = @import("Analyzer.zig").Analyzer.Result;
 const Stmt = @import("Parser.zig").Stmt;
+const Expr = @import("Parser.zig").Expr;
 const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
@@ -13,6 +14,7 @@ const CodeGenError = error{
     EmptyLine,
     TargetMachineCreationFailed,
     EmitFailed,
+    InvalidModule,
 };
 
 pub const CodeGen = struct {
@@ -20,17 +22,20 @@ pub const CodeGen = struct {
     module: c.LLVMModuleRef,
     builder: c.LLVMBuilderRef,
     allocator: std.mem.Allocator,
+    symbols: std.StringHashMap(c.LLVMValueRef),
 
     pub fn init(allocator: std.mem.Allocator) CodeGen {
         const context = c.LLVMContextCreate();
-        const module = c.LLVMModuleCreateWithNameInContext("putchar test", context);
+        const module = c.LLVMModuleCreateWithNameInContext("test", context);
         const builder = c.LLVMCreateBuilderInContext(context);
+        const symbols = std.StringHashMap(c.LLVMValueRef).init(allocator);
 
         return .{
             .context = context,
             .module = module,
             .builder = builder,
             .allocator = allocator,
+            .symbols = symbols,
         };
     }
 
@@ -77,6 +82,14 @@ pub const CodeGen = struct {
 
         if (target_machine == null) return error.TargetMachineCreationFailed;
 
+        // test if module works or not
+        var err_msg: [*c]u8 = null;
+        if (c.LLVMVerifyModule(self.module, c.LLVMPrintMessageAction, &err_msg) != 0) {
+            std.debug.print("Module verification failed: {s}\n", .{err_msg});
+            c.LLVMDisposeMessage(err_msg);
+            return error.InvalidModule;
+        }
+        
         if (c.LLVMTargetMachineEmitToFile(
             target_machine,
             self.module,
@@ -114,7 +127,7 @@ pub const CodeGen = struct {
         const putchar_func = c.LLVMGetNamedFunction(self.module, "putchar");
         const putchar_type = c.LLVMGlobalGetValueType(putchar_func);
 
-        const char_val = c.LLVMConstInt(c.LLVMInt32Type(), char, 0);
+        const char_val = c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), char, 0);
         var args = [_]c.LLVMValueRef{char_val};
 
         _ = c.LLVMBuildCall2(
@@ -128,19 +141,19 @@ pub const CodeGen = struct {
     }
 
     fn declarePutchar(self: *CodeGen) void {
-        var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32Type() };
-        const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), &param_types, 1, 0);
+        var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32TypeInContext(self.context) };
+        const func_type = c.LLVMFunctionType(c.LLVMInt32TypeInContext(self.context), &param_types, 1, 0);
         _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
     // create main function
     fn createFunction(self: *CodeGen, name: []const u8, decl: Stmt) !void {
-        // string to memory
+        // string to memory, arbitrary 200 char limit
         var buf: [200]u8 = undefined;
-        const name_copy = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
+        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
         
-        const func_type = c.LLVMFunctionType(c.LLVMInt32Type(), null, 0, 0);
-        const func = c.LLVMAddFunction(self.module, name_copy.ptr, func_type);
+        const func_type = c.LLVMFunctionType(c.LLVMInt32TypeInContext(self.context), null, 0, 0);
+        const func = c.LLVMAddFunction(self.module, &buf, func_type);
 
         const block = c.LLVMAppendBasicBlock(func, "block");
         c.LLVMPositionBuilderAtEnd(self.builder, block);
@@ -175,14 +188,83 @@ pub const CodeGen = struct {
                 .var_decl => |var_decl| {
                     try createVariableDecl(self, var_decl);  
                 },
+                .if_stmt => |if_stmt| {
+                    const then_block = c.LLVMAppendBasicBlock(func, "if-then");
+                    const else_block = c.LLVMAppendBasicBlock(func, "if-else");
+                    const merge_block = c.LLVMAppendBasicBlock(func, "if-merge");
+        
+                    const evaluated = try generateExpr(self, if_stmt.condition);
+
+                    _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
+        
+                    c.LLVMPositionBuilderAtEnd(self.builder, then_block);
+                    for (if_stmt.if_body) |item| {
+                        switch (item) {
+                            .expr_stmt => |expr_stmt| {
+                                const call = expr_stmt.expr.func_call.*;
+                                const arg = call.args[0];
+                    
+                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
+                                    for (0..arg.literal.value.len) |i| {
+                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
+                                        createPutcharCall(self, arg.literal.value[i]);
+                                    }
+                                    createPutcharCall(self, '\n');
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                    _ = c.LLVMBuildBr(self.builder, merge_block);
+
+                    c.LLVMPositionBuilderAtEnd(self.builder, else_block);
+                    _ = c.LLVMBuildBr(self.builder, merge_block);
+                    
+                    c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
+                },
                 else => {},
             }
         }
 
-        const ret_val = c.LLVMConstInt(c.LLVMInt32Type(), 0, 0);
+        const ret_val = c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), 0, 0);
         _ = c.LLVMBuildRet(self.builder, ret_val);
     }
 
+    fn generateExpr(self: *CodeGen, expr: Expr) anyerror!c.LLVMValueRef {
+        return switch (expr) {
+            .binary => try generateBinExpr(self, expr.binary.*),
+            .literal => try generateLiteral(self, expr.literal),
+            else => try generateLiteral(self, expr.literal), // temp
+        };
+    }
+
+    fn generateBinExpr(self: *CodeGen, bin: Expr.BinaryExpr) !c.LLVMValueRef {
+        const left = try generateExpr(self, bin.left);
+        const right = try generateExpr(self, bin.right);
+
+        switch (bin.op) {
+            .GREATER => {
+                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "cmp");
+            },
+            else => {},
+        }
+
+        return null;
+    }
+
+    fn generateLiteral(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
+        if (lit.type == .variable) {
+            const alloca = self.symbols.get(lit.value);
+
+            var buf: [200]u8 = undefined;
+            _ = try std.fmt.bufPrintZ(&buf, "{s}", .{lit.value});
+            return c.LLVMBuildLoad2(self.builder, c.LLVMInt32TypeInContext(self.context), alloca.?, &buf);
+        }
+
+        const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
+        return c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), val, 0);
+    }
+    
     fn createVariableDecl(self: *CodeGen, decl: Stmt.VariableDecl) !void {
         const name = decl.name.literal.value;
         const var_type = decl.var_type.named.primitive;
@@ -190,7 +272,7 @@ pub const CodeGen = struct {
         var ir_type: c.LLVMTypeRef = undefined;
         switch (var_type) {
             .c_int => {
-                ir_type = c.LLVMInt32Type();
+                ir_type = c.LLVMInt32TypeInContext(self.context);
             },
             else => {},
         }
@@ -199,6 +281,12 @@ pub const CodeGen = struct {
         var buf: [200]u8 = undefined;
         _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
 
-        _ = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
+        const alloca = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
+
+        const val = try generateLiteral(self, decl.value.literal);
+
+        _ = c.LLVMBuildStore(self.builder, val, alloca);
+        
+        try self.symbols.put(name, alloca);
     }
 };

@@ -226,6 +226,7 @@ pub const Analyzer = struct {
                         return AnalysisError.DuplicateVariable;
                     }
                     try self.symbol_table.addItemToCurrentScope(name, decl);
+                    //stmt.var_decl.symbol = decl; WARN: this doesn't work
                 },
                 .if_stmt => |s| {
                     try checkIfStmt(self, s);
@@ -244,7 +245,7 @@ pub const Analyzer = struct {
         self.symbol_table.exitScope();
     }
 
-    // TODO: this type checking doesn't work
+    // TODO: this type checking doesn't work, make it work somehow
     //fn checkCallExpr(self: *Analyzer, stmt: Stmt.ExprStmt) void {
     //    const call = stmt.expr.func_call.*;
     //    
@@ -260,6 +261,8 @@ pub const Analyzer = struct {
     //    }        
     //}
 
+    // TODO: at some point check that
+    // the expression even evaluates to a boolean
     fn checkIfStmt(self: *Analyzer, stmt: Stmt.IfStmt) !void {
         try self.symbol_table.enterScope();
 
@@ -283,7 +286,6 @@ pub const Analyzer = struct {
             }
         }
 
-        // currently just check the expression, nothing else
         // TODO: check the if body
 
         self.symbol_table.exitScope();

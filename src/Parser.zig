@@ -109,6 +109,7 @@ pub const Stmt = union(enum) {
         value: Expr,
         mutable: bool,
         var_type: TypeAnnotation,
+        symbol: ?*Symbol,
     };
 
     pub const ExprStmt = struct {
@@ -443,7 +444,7 @@ pub const Parser = struct {
         // currently support only literals for variable assignments
         const value = try literal(self);
 
-        // multi line var decl currently not allowed...
+        // multi line var decl currently not allowed (kind of arbitrary though)
         if (currToken(self).span.line != line) {
             reportParseError(currToken(self));
             return ParseError.MultiLineVarDecl;
@@ -457,6 +458,7 @@ pub const Parser = struct {
             .name = var_name,
             .value = Expr{ .literal = value.literal },
             .var_type = var_type,
+            .symbol = null,
         }};
     }
 

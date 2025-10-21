@@ -1,7 +1,0 @@
-extern fn putchar(c: c_int) -> c_int;
-
-fn main() -> c_int {
-	println("Nimeni on olkku45.");
-	
-	return 0;
-}

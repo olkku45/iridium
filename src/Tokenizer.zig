@@ -291,7 +291,7 @@ pub const Tokenizer = struct {
 
     pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
         while (!isAtEnd(self)) {
-            try checkErrors(self);
+            //try checkErrors(self);
             self.start = self.current;
             try getToken(self, allocator);
         }
@@ -299,6 +299,7 @@ pub const Tokenizer = struct {
         return self.tokens.toOwnedSlice(allocator);
     }
 
+    // TODO: remove this and switch to work in parser
     fn checkErrors(self: *Tokenizer) !void {
         const char = currentChar(self);
         //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
