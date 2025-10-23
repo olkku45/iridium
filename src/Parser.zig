@@ -318,6 +318,7 @@ pub const Parser = struct {
         }};
     }
 
+    // TODO do something here
     fn binaryExpr(self: *Parser) !Expr {
         const left = try parseLiteral(self);
 
@@ -359,7 +360,7 @@ pub const Parser = struct {
     fn retStmt(self: *Parser) !Stmt {
         try advance(self, .RETURN, null);
         
-        const ret_value = try literal(self);
+        const ret_value = try parseLiteral(self);
 
         try advance(self, .SEMICOLON, "expected ';' as line break");
 
@@ -381,15 +382,15 @@ pub const Parser = struct {
         while (curr_type != .RIGHT_PAREN) {
             switch (curr_type) {
                 .STRING => {
-                    const str_arg = try literalWithType(self, .primitive);
+                    const str_arg = try parseLiteral(self);
                     try args.append(self.alloc, str_arg);
                 },
                 .IDENTIFIER => {
-                    const ident_arg = try literalWithType(self, .variable);
+                    const ident_arg = try parseLiteral(self);
                     try args.append(self.alloc, ident_arg);  
                 },
                 .CHARACTER => {
-                    const char_arg = try literalWithType(self, .primitive);
+                    const char_arg = try parseLiteral(self);
                     try args.append(self.alloc, char_arg);  
                 },
                 else => {},
@@ -427,7 +428,6 @@ pub const Parser = struct {
     
     fn variableDecl(self: *Parser) !Stmt {
         var mutable = false;
-        const line = currToken(self).span.line;
 
         try advance(self, .LET, null);
         
@@ -445,12 +445,6 @@ pub const Parser = struct {
         try advance(self, .EQUAL, "expected '='");
 
         const value = try parseLiteral(self);
-
-        // multi line var decl currently not allowed (kind of arbitrary though)
-        if (currToken(self).span.line != line) {
-            reportParseError(currToken(self));
-            return ParseError.MultiLineVarDecl;
-        }
 
         try advance(self, .SEMICOLON, "expected ';'");
 
