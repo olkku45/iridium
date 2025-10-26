@@ -81,7 +81,6 @@ pub const Stmt = union(enum) {
     expr_stmt: ExprStmt,
     ret_stmt: RetStmt,
     error_node: ErrorNode,
-    void_node: VoidNode,
 
     pub const IfStmt = struct {
         condition: Expr,
@@ -123,10 +122,8 @@ pub const Stmt = union(enum) {
     };
 
     pub const ErrorNode = struct {
-        // something here?
+        // TODO something here?
     };
-
-    pub const VoidNode = struct {};
 };
 
 pub const Expr = union(enum) {
@@ -190,11 +187,17 @@ fn initDiagnostics() std.array_list.Aligned(Diagnostic, null) {
     return diagnostics;
 }
 
+fn initStatements() std.array_list.Aligned(Stmt, null) {
+    const stmts: std.array_list.Aligned(Stmt, null) = .empty;
+    return stmts;
+}
+
 pub const Parser = struct {
     tokens: []Token,
     current: usize,
     alloc: std.mem.Allocator,
     diagnostics: std.array_list.Aligned(Diagnostic, null),
+    statements: std.array_list.Aligned(Stmt, null),
 
     pub fn init(tokens: []Token, allocator: std.mem.Allocator) Parser {
         return Parser{
@@ -202,19 +205,17 @@ pub const Parser = struct {
             .current = 0,
             .alloc = allocator,
             .diagnostics = initDiagnostics(),
+            .statements = initStatements(),
         };
     }
 
     pub fn parseTokens(self: *Parser) ![]Stmt {
-        var statements: std.array_list.Aligned(Stmt, null) = .empty;
-
         while (!isAtEnd(self)) {
             const stmt = try parseStatement(self);
-            try statements.append(self.alloc, stmt);
+            try self.statements.append(self.alloc, stmt);
         }
         
-        const slice = try statements.toOwnedSlice(self.alloc);
-        
+        const slice = try self.statements.toOwnedSlice(self.alloc);
         return slice;
     }
 
@@ -243,7 +244,6 @@ pub const Parser = struct {
             },
             else => {},
         }
-
         return stmt;
     }
 
@@ -253,9 +253,15 @@ pub const Parser = struct {
         try advance(self, .LEFT_BRACE, "expected '{'");
 
         while (getCurrentTokenType(self) != .RIGHT_BRACE) {
-            if (isAtEnd(self)) return ParseError.UnexpectedEOF; // TODO change this
+            if (isAtEnd(self)) {
+                try collectError(self, "unexpected end of file", currToken(self).span);
 
-            const stmt = try parseStatement(self); // TODO change how this advances
+                const err = Stmt{ .error_node = .{} };
+                try self.statements.append(self.alloc, err);
+
+                return stmt_list;
+            }
+            const stmt = try parseStatement(self);
             try stmt_list.append(self.alloc, stmt);
         }
 
@@ -268,7 +274,6 @@ pub const Parser = struct {
     fn fnDeclaration(self: *Parser) !Stmt {
         try advance(self, .FN, null);
 
-        try self.expect(.IDENTIFIER);
         const func_name = try parseLiteral(self);
 
         try advance(self, .LEFT_PAREN, "expected '(' after function name");
@@ -279,12 +284,10 @@ pub const Parser = struct {
         try advance(self, .RIGHT_ARROW, "expected '->'");
 
         const ret_type = try parseType(self);
-        try advanceType(self, currToken(self));
-
         const func_body = try parseBlock(self);
 
         // TODO: loop over stmts to see if there's a return stmt,
-        // if not return error, or some other way to check for a
+        // if not return error except if ret type is void, or some other way to check for a
         // return statement...
         
         return Stmt{ .fn_decl = .{
@@ -301,11 +304,10 @@ pub const Parser = struct {
 
     fn ifStmt(self: *Parser) !Stmt {
         try advance(self, .IF, null);
-
         try advance(self, .LEFT_PAREN, "expected '(' after if");
 
         // just a binary expression as condition for now
-        // TODO: generalize for all expressions
+        // TODO: generalize for all expression types
         const cond = try binaryExpr(self);
 
         try advance(self, .RIGHT_PAREN, "expected ')' after condition");
@@ -318,43 +320,23 @@ pub const Parser = struct {
         }};
     }
 
-    // TODO do something here
-    fn binaryExpr(self: *Parser) !Expr {
+    fn binaryExpr(self: *Parser) !Stmt {
         const left = try parseLiteral(self);
-
-        const op = currToken(self);
-        try advanceOperator(self, currToken(self));
-
-        var bin_op: BinaryOp = undefined;
-        switch (op.token_type) {
-            .PLUS => { bin_op = .ADD; },
-            .MINUS => { bin_op = .SUB; },
-            .STAR => { bin_op = .MUL; },
-            .SLASH => { bin_op = .DIV; },
-            .GREATER => { bin_op = .GREATER; },
-            .LESS => { bin_op = .LESS; },
-            .EQUAL => { bin_op = .EQUAL; },
-            .BANG_EQUAL => { bin_op = .NOT_EQUAL; },
-            .EQUAL_EQUAL => { bin_op = .EQUAL_EQUAL; },
-            .LESS_EQUAL => { bin_op = .LESS_EQUAL; },
-            .GREATER_EQUAL => { bin_op = .GREATER_EQUAL; },
-            .PLUS_EQUAL => { bin_op = .ADD_EQUAL; },
-            .MINUS_EQUAL => { bin_op = .SUB_EQUAL; },
-            .STAR_EQUAL => { bin_op = .MUL_EQUAL; },
-            .SLASH_EQUAL => { bin_op = .DIV_EQUAL; },
-            else => {},
-        }
-
+        const op = parseBinOperator(self);
         const right = try parseLiteral(self);
 
         const binary = try self.alloc.create(Expr.BinaryExpr);
         binary.* = .{
             .left = left,
-            .op = bin_op,
+            .op = op,
             .right = right,
         };
 
-        return Expr{ .binary = binary };
+        return Stmt { .expr_stmt = .{
+            .expr = .{
+                .binary = binary,
+            }
+        }};
     }
 
     fn retStmt(self: *Parser) !Stmt {
@@ -405,12 +387,11 @@ pub const Parser = struct {
 
         const call = try self.alloc.create(Expr.CallExpr);
         call.* = .{
-            // TODO: shorten this
             .func_name = Expr{ .literal = .{
                 .value = ident.literal.value,
                 .span = ident.literal.span,
                 .type = .function,
-                .annotation = null,
+                .annotation = null, // TODO should this be null?
             }},
             .args = args_slice,
             .func_symbol = null,
@@ -440,7 +421,6 @@ pub const Parser = struct {
         try advance(self, .COLON, "expected ':'");
         
         const var_type = try parseType(self);
-        try advanceType(self, currToken(self));
 
         try advance(self, .EQUAL, "expected '='");
 
@@ -467,18 +447,16 @@ pub const Parser = struct {
         
         try advance(self, .LEFT_PAREN, "expected ')'");
 
-        try advanceIdentifier(self, currToken(self));
+        try advance(self, .IDENTIFIER, null);
 
         try advance(self, .COLON, "expected ':'");
 
         const arg_type = try parseType(self);
-        try advanceType(self, currToken(self));
         
         try advance(self, .RIGHT_PAREN, "expected ')'");
-        try advance(self, .RIGHT_ARROW, "expected '->'");
+        try advance(self, .RIGHT_ARROW, "expected '->'"); // TODO change to '=>'
 
         const ret_type = try parseType(self);
-        try advanceType(self, currToken(self));
 
         try advance(self, .SEMICOLON, "expected ';'");
 
@@ -494,60 +472,131 @@ pub const Parser = struct {
         }};
     }
 
-    fn parseType(self: *Parser) ?TypeAnnotation.NamedType.PrimitiveType {
+    fn parseBinOperator(self: *Parser) !?BinaryOp {
+        const op = currToken(self);
+        const m = "expected operator";
+
+        switch (op.token_type) {
+            .PLUS => {
+                try advance(self, .PLUS, m);
+                return .ADD;   
+            },
+            .MINUS => {
+                try advance(self, .MINUS, m);
+                return .SUB;
+            },
+            .STAR => {
+                try advance(self, .STAR, m);
+                return .MUL;
+            },
+            .SLASH => {
+                try advance(self, .SLASH, m);
+                return .DIV;  
+            },
+            .GREATER => {
+                try advance(self, .GREATER, m);
+                return .GREATER;
+            },
+            .LESS => {
+                try advance(self, .LESS, m);
+                return .LESS;
+            },
+            .EQUAL => {
+                try advance(self, .EQUAL, m);
+                return .EQUAL;
+            },
+            .BANG_EQUAL => {
+                try advance(self, .BANG_EQUAL, m);
+                return .NOT_EQUAL;
+            },
+            .EQUAL_EQUAL => {
+                try advance(self, .EQUAL_EQUAL, m);
+                return .EQUAL_EQUAL;
+            },
+            .LESS_EQUAL => {
+                try advance(self, .LESS_EQUAL, m);
+                return .LESS_EQUAL;
+            },
+            .GREATER_EQUAL => {
+                try advance(self, .GREATER_EQUAL, m);
+                return .GREATER_EQUAL;
+            },
+            .PLUS_EQUAL => {
+                try advance(self, .PLUS_EQUAL, m);
+                return .ADD_EQUAL;
+            },
+            .MINUS_EQUAL => {
+                try advance(self, .MINUS_EQUAL, m);
+                return .SUB_EQUAL;
+            },
+            .STAR_EQUAL => {
+                try advance(self, .STAR_EQUAL, m);
+                return .MUL_EQUAL;
+            },
+            .SLASH_EQUAL => {
+                try advance(self, .SLASH_EQUAL, m);
+                return .DIV_EQUAL;
+            },
+            else => {},
+        }
+        return null;
+    }
+
+    fn parseType(self: *Parser) !?TypeAnnotation.NamedType.PrimitiveType {
         const curr = currToken(self);
+        const m = "expected type";
 
         switch (curr.token_type) {
             .C_INT => {
-                advance(self, .C_INT, null);
+                try advance(self, .C_INT, m);
                 return .c_int;
             },
             .UINT8 => {
-                advance(self, .UINT8, null);
+                try advance(self, .UINT8, m);
                 return .u8;
             },
             .UINT16 => {
-                advance(self, .UINT16, null);
+                try advance(self, .UINT16, m);
                 return .u16;
             },
             .UINT32 => {
-                advance(self, .UINT32, null);
+                try advance(self, .UINT32, m);
                 return .u32;  
             },
             .UINT64 => {
-                advance(self, .UINT64, null);
+                try advance(self, .UINT64, m);
                 return .u64;  
             },
             .INT8 => {
-                advance(self, .INT8, null);
+                try advance(self, .INT8, m);
                 return .i8;  
             },
             .INT16 => {
-                advance(self, .INT16, null);
+                try advance(self, .INT16, m);
                 return .i16;  
             },
             .INT32 => {
-                advance(self, .INT32, null);
+                try advance(self, .INT32, m);
                 return .i32;  
             },
             .INT64 => {
-                advance(self, .INT64, null);
+                try advance(self, .INT64, m);
                 return .i64;
             },
             .FLOAT32 => {
-                advance(self, .FLOAT32, null);
+                try advance(self, .FLOAT32, m);
                 return .f32;  
             },
             .FLOAT64 => {
-                advance(self, .FLOAT64, null);
+                try advance(self, .FLOAT64, m);
                 return .f64;  
             },
             .BOOL => {
-                advance(self, .BOOL, null);
+                try advance(self, .BOOL, m);
                 return .bool;  
             },
             .VOID => {
-                advance(self, .VOID, null);
+                try advance(self, .VOID, m);
                 return .void;
             },
             else => {
@@ -575,14 +624,18 @@ pub const Parser = struct {
 
         return lit;
     }
-
-    // TODO return error node
+    
     fn advance(self: *Parser, token_type: TokenType, msg: ?[]const u8) !void {
         if (isAtEnd(self)) {
-            try collectError(self, "Unexpected end of file", currToken(self).span);
+            try collectError(self, "unexpected end of file", currToken(self).span);
+            const err = Stmt{ .error_node = .{} };
+            try self.statements.append(self.alloc, err);
+            
+            return;
         }
         if (getCurrentTokenType(self) != token_type) {
             try collectError(self, msg, currToken(self).span);
+            appendErrorAndSync(self);
         }
         if (token_type.category() == .KEYWORD) {
             try checkKeyword(self, currToken(self));
@@ -590,66 +643,27 @@ pub const Parser = struct {
         self.current += 1;
     }
 
-    // TODO: remove all of these different advance functions
-    fn advanceKeyword(self: *Parser, token: Token) !void {
-        if (isAtEnd(self)) return;
-
-        if (token.token_type.category() != .KEYWORD) {
-            reportParseError(token);
-            return ParseError.WrongToken;
-        }
-        try checkKeyword(self, token);
-        self.current += 1;
-    }
-
-    fn advanceIdentifier(self: *Parser, token: Token) !void {
-        if (isAtEnd(self)) return;
-        
-        if (token.token_type.category() != .IDENTIFIER) {
-            reportParseError(token);
-            return ParseError.WrongToken;
+    fn advanceSync(self: *Parser) void {
+        if (isAtEnd(self)) {
+            try collectError(self, "unexpected end of file", currToken(self).span);
+            return;
         }
         self.current += 1;
     }
 
-    fn advanceType(self: *Parser, token: Token) !void {
-        if (isAtEnd(self)) return;
-            
-        if (token.token_type.category() != .TYPE) {
-            reportParseError(token);
-            return ParseError.WrongToken;
-        }
-        self.current += 1;
+    fn appendErrorAndSync(self: *Parser) !void {
+        const err = Stmt{ .error_node = .{} };
+        try self.statements.append(self.alloc, err);
+        try synchronize(self);
     }
 
-    fn advanceOperator(self: *Parser, token: Token) !void {
-        if (isAtEnd(self)) return;
-        
-        if (token.token_type.category() != .OPERATOR) {
-            reportParseError(token);
-            return ParseError.WrongToken;
-        }
-        self.current += 1;
-    }
-
-    fn advanceCharacter(self: *Parser, token: Token) !void {
-        if (isAtEnd(self)) return;
-        
-        if (token.token_type.category() != .CHARACTER) {
-            reportParseError(token);
-            return ParseError.WrongToken;
-        }
-        self.current += 1;
-    }
-
-    // TODO remove this also
     fn checkKeyword(self: *Parser, token: Token) !void {
         switch (token.token_type) {
             .EXTERN => {
                 const next = try nextToken(self);
                 if (next.token_type != .FN) {
-                    reportParseError(token);
-                    return ParseError.WrongToken;
+                    try collectError(self, "expected 'fn'", currToken(self).span);
+                    appendErrorAndSync(self);
                 }
             },
             // etc...
@@ -687,6 +701,28 @@ pub const Parser = struct {
 
     fn isAtStart(self: *Parser) bool {
         return self.current == 0;
+    }
+
+    fn synchronize(self: *Parser) !void {
+        while (!isAtEnd(self)) {
+            advanceSync(self);
+
+            if (getCurrentTokenType(self) == .SEMICOLON) {
+                try advance(self, .SEMICOLON, null);
+                return;
+            }
+
+            switch (getCurrentTokenType(self)) {
+                .FN => return,
+                .FOR => return,
+                .WHILE => return,
+                .IF => return,
+                .RETURN => return,
+                .LET => return,
+                // etc...
+                else => {},
+            }
+        }
     }
 
     fn reportParseError(token: Token) void {
