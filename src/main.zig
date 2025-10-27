@@ -53,13 +53,14 @@ pub fn main() !void {
     var parser = Parser.init(line_tokens, allocator);
     const ast = try parser.parseTokens();
 
+    // check parsing errors before going to semantic analysis
     const diagnostics = try parser.getDiagnostics();
     if (diagnostics.len > 0) {
         for (diagnostics) |diag| {
             switch (diag.severity) {
                 .err => {
                     if (diag.msg == null) print("Error at line {d}: after '{s}'\n", .{diag.token.span.line, diag.token.lexeme})
-                    else print("Error at line {d}: {s} after '{s}'\n", .{diag.token.span.line, diag.msg.?, diag.token.lexeme});
+                    else print("Error at line {d}: {s}; after '{s}'\n", .{diag.token.span.line, diag.msg.?, diag.token.lexeme});
                 },
                 else => {},
             }

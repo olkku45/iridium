@@ -196,7 +196,7 @@ fn initStatements() std.array_list.Aligned(Stmt, null) {
     return stmts;
 }
 
-// TODO: more general handling for identifiers
+// TODO: more general handling of identifiers
 pub const Parser = struct {
     tokens: []Token,
     current: usize,
@@ -253,8 +253,8 @@ pub const Parser = struct {
                 stmt = try retStmt(self);
             },
             else => {
-                reportParseError(currToken(self));
-                return ParseError.NotAStatement;
+                //reportParseError(currToken(self));
+                //return ParseError.NotAStatement;
             },
         }
         if (stmt == null) return null;
@@ -749,8 +749,8 @@ pub const Parser = struct {
                 .IF => return,
                 .RETURN => return,
                 .LET => return,
-                .LEFT_BRACE => return,
-                .RIGHT_BRACE => return,
+                //.LEFT_BRACE => return,
+                //.RIGHT_BRACE => return,
                 .EXTERN => return,
                 // etc...
                 else => {},

@@ -92,7 +92,7 @@ pub const TokenType = enum {
     TRY,
     PUB,
 
-    // TODO: remove categories
+    // TODO: remove categories as they aren't needed
     pub const Category = enum {
         KEYWORD,
         OPERATOR,
