@@ -162,7 +162,7 @@ pub const CodeGen = struct {
             switch (stmt) {
                 .expr_stmt => |s| {
                     const call = s.expr.func_call.*;
-                    const arg = call.args[0];
+                    const arg = call.args;
                     var putchar_char: u8 = undefined;
 
                     const func_ident = call.func_name.literal.value;
@@ -202,7 +202,7 @@ pub const CodeGen = struct {
                         switch (item) {
                             .expr_stmt => |expr_stmt| {
                                 const call = expr_stmt.expr.func_call.*;
-                                const arg = call.args[0];
+                                const arg = call.args;
                     
                                 if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
                                     for (0..arg.literal.value.len) |i| {
@@ -253,7 +253,7 @@ pub const CodeGen = struct {
     }
 
     fn generateLiteral(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
-        if (lit.type == .variable) {
+        if (lit.type == .identifier) {
             const alloca = self.symbols.get(lit.value);
 
             var buf: [200]u8 = undefined;

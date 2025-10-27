@@ -3,6 +3,7 @@ const Span = @import("main.zig").Span;
 const Stmt = @import("Parser.zig").Stmt;
 const Expr = @import("Parser.zig").Expr;
 const TypeAnnotation = @import("Parser.zig").TypeAnnotation;
+const LiteralType = @import("Parser.zig").LiteralType;
 const c = @import("llvm.zig").c;
 const print = std.debug.print;
 
@@ -271,14 +272,14 @@ pub const Analyzer = struct {
         const left = cond.left.literal;
         const right = cond.right.literal;
 
-        if (left.type == .variable) {
+        if (left.type == .identifier) {
             const lookup = self.symbol_table.lookupItem(left.value);
             if (lookup == null) {
                 reportLiteralError(left);
                 return AnalysisError.VariableOutOfScope;
             }
         }
-        if (right.type == .variable) {
+        if (right.type == .identifier) {
             const lookup = self.symbol_table.lookupItem(right.value);
             if (lookup == null) {
                 reportLiteralError(right);
@@ -292,9 +293,7 @@ pub const Analyzer = struct {
     }
 
     fn checkRetStmt(self: *Analyzer, stmt: Stmt.RetStmt) !void {
-        if (stmt.value.literal.type == .primitive) {
-            
-        } else if (stmt.value.literal.type == .variable) {
+        if (stmt.value.literal.type == .identifier) {
             const lookup = self.symbol_table.lookupItem(stmt.value.literal.value);
             if (lookup == null) {
                 reportLiteralError(stmt.value.literal);

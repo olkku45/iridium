@@ -10,6 +10,7 @@ const print = std.debug.print;
 
 const Error = error{
     NotIridiumFile,
+
 };
 
 pub const Span = struct {
@@ -24,8 +25,6 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-
-    //var tokens_list: std.array_list.Aligned(Token, null) = .empty;
 
     var args = std.process.args();
     var file_name: []const u8 = "";
@@ -54,7 +53,21 @@ pub fn main() !void {
     var parser = Parser.init(line_tokens, allocator);
     const ast = try parser.parseTokens();
 
-    var stdout_buffer: [100_000]u8 = undefined;
+    const diagnostics = try parser.getDiagnostics();
+    if (diagnostics.len > 0) {
+        for (diagnostics) |diag| {
+            switch (diag.severity) {
+                .err => {
+                    if (diag.msg == null) print("Error at line {d}: after '{s}'\n", .{diag.token.span.line, diag.token.lexeme})
+                    else print("Error at line {d}: {s} after '{s}'\n", .{diag.token.span.line, diag.msg.?, diag.token.lexeme});
+                },
+                else => {},
+            }
+        }
+        std.process.exit(0);
+    }
+    
+    var stdout_buffer: [100_000]u8 = undefined; // 100k chars max printed ast len now (arbitrary)
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 
     const stdout = &stdout_writer.interface;
