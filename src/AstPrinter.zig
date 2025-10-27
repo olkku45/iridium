@@ -31,6 +31,7 @@ pub const AstPrinter = struct {
             .var_decl => try printVarDecl(self, stmt),
             .expr_stmt => try printExprStmt(self, stmt),
             .ret_stmt => try printRetStmt(self, stmt),
+            .error_node => try printError(self),
         }
     }
 
@@ -40,6 +41,11 @@ pub const AstPrinter = struct {
         while (i < self.indent_level * self.indent_size) : (i += 1) {
             try self.writer.writeByte(' ');
         }
+    }
+
+    fn printError(self: *AstPrinter) !void {
+        try self.writeIndent();
+        try self.writer.writeAll("ERROR\n");
     }
 
     fn printIfStmt(self: *AstPrinter, stmt: Stmt) anyerror!void {
@@ -173,13 +179,9 @@ pub const AstPrinter = struct {
 
         self.indent();
         
-        for (expr.args) |arg| {
-            try self.writeIndent();
-            try self.writer.writeAll(arg.literal.value);
-
-            try self.writeIndent();
-            try self.writer.writeByte('\n');
-        }
+        try self.writeIndent();
+        try self.writer.writeAll(expr.args.literal.value);
+        try self.writer.writeByte('\n');
 
         self.dedent();
         self.dedent();

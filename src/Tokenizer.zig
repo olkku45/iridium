@@ -92,6 +92,7 @@ pub const TokenType = enum {
     TRY,
     PUB,
 
+    // TODO: remove categories as they aren't needed
     pub const Category = enum {
         KEYWORD,
         OPERATOR,
@@ -272,7 +273,7 @@ pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
     current: usize,
-    line: usize, // do we need these here
+    line: usize,
     col: usize,
     keywords: std.StringHashMap(TokenType),
     tokens: std.array_list.Aligned(Token, null),
