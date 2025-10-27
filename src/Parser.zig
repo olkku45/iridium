@@ -231,42 +231,39 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) anyerror!?Stmt {
         const curr_token_type = getCurrentTokenType(self);
-        var stmt: ?Stmt = undefined;
 
         switch (curr_token_type) {
             .EXTERN => {
-                stmt = try externFnDeclaration(self);
+                return try externFnDeclaration(self) orelse return null;
             },
             .FN => {
-                stmt = try fnDeclaration(self);  
+                return try fnDeclaration(self) orelse return null;  
             },
             .LET => {
-                stmt = try variableDecl(self);  
+                return try variableDecl(self) orelse return null;  
             },
             .IF => {
-                stmt = try ifStmt(self);
+                return try ifStmt(self) orelse return null;
             },
             .IDENTIFIER => {
-                stmt = try functionCall(self);    
+                return try functionCall(self) orelse return null;    
             },
             .RETURN => {
-                stmt = try retStmt(self);
+                return try retStmt(self) orelse return null;
             },
             else => {
                 //reportParseError(currToken(self));
                 //return ParseError.NotAStatement;
             },
         }
-        if (stmt == null) return null;
-
-        return stmt;
+        return null;
     }
 
     fn parseBlock(self: *Parser) !?[]Stmt {
         var stmt_list: std.array_list.Aligned(Stmt, null) = .empty;
 
-        // TODO: do we have to synchronize here?
-        if (try advance(self, .LEFT_BRACE, "expected '{'") == null) return null;
+        // TODO fix, this gives a weird error message sometimes
+        try advance(self, .LEFT_BRACE, "expected '{'") orelse return null;
 
         while (getCurrentTokenType(self) != .RIGHT_BRACE) {
             if (isAtEnd(self)) {
@@ -280,7 +277,7 @@ pub const Parser = struct {
         }
 
         if (!isAtEnd(self)) {
-            if (try advance(self, .RIGHT_BRACE, "expected '}'") == null) return null;
+            try advance(self, .RIGHT_BRACE, "expected '}'") orelse return null;
         }
 
         const slice = try stmt_list.toOwnedSlice(self.alloc);
@@ -288,32 +285,30 @@ pub const Parser = struct {
     }
 
     fn fnDeclaration(self: *Parser) !?Stmt {
-        if (try advance(self, .FN, null) == null) return null;
+        try advance(self, .FN, null) orelse return null;
 
-        const func_name = try parseLiteral(self);
-        if (func_name == null) return null;
+        const func_name = try parseLiteral(self) orelse return null;
 
-        if (try advance(self, .LEFT_PAREN, "expected '(' after function name") == null) return null;
+        try advance(self, .LEFT_PAREN, "expected '(' after function name") orelse return null;
 
         // no params for now
 
-        if (try advance(self, .RIGHT_PAREN, "expected ')'") == null) return null;
-        if (try advance(self, .RIGHT_ARROW, "expected '->'") == null) return null; // TODO change to '=>'
+        try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+        try advance(self, .RIGHT_ARROW, "expected '->'") orelse return null; // TODO change to '=>'
 
-        const ret_type = try parseType(self);
-        const func_body = try parseBlock(self);
-        if (ret_type == null or func_body == null) return null;
+        const ret_type = try parseType(self) orelse return null;
+        const func_body = try parseBlock(self) orelse return null;
 
         // TODO: loop over stmts to see if there's a return stmt,
         // if not return error except if ret type is void, or some other way to check for a
         // return statement...
         
         return Stmt{ .fn_decl = .{
-            .fn_body = func_body.?,
-            .name = func_name.?,
+            .fn_body = func_body,
+            .name = func_name,
             .ret_type = TypeAnnotation{
                 .named = .{
-                    .primitive = ret_type.?,
+                    .primitive = ret_type,
                 },
             },
             .symbol = null,
@@ -321,71 +316,64 @@ pub const Parser = struct {
     }
 
     fn ifStmt(self: *Parser) !?Stmt {
-        if (try advance(self, .IF, "expected 'if'") == null) return null;
-        if (try advance(self, .LEFT_PAREN, "expected '(' after if") == null) return null;
+        try advance(self, .IF, "expected 'if'") orelse return null;
+        try advance(self, .LEFT_PAREN, "expected '(' after if") orelse return null;
 
         // just a binary expression as condition for now
         // TODO: generalize for all expression types
-        const cond = try binaryExpr(self);
+        const cond = try binaryExpr(self) orelse return null;
 
-        if (try advance(self, .RIGHT_PAREN, "expected ')' after condition") == null) return null;
+        try advance(self, .RIGHT_PAREN, "expected ')' after condition") orelse return null;
 
-        const if_body = try parseBlock(self);
-
-        if (cond == null or if_body == null) return null;
+        const if_body = try parseBlock(self) orelse return null;
 
         return Stmt{ .if_stmt = .{
-            .condition = cond.?,
-            .if_body = if_body.?,
+            .condition = cond,
+            .if_body = if_body,
         }};
     }
 
     fn binaryExpr(self: *Parser) !?Expr {
-        const left = try parseLiteral(self);
-        const op = try parseBinOperator(self);
-        const right = try parseLiteral(self);
-
-        if (left == null or op == null or right == null) return null;
+        const left = try parseLiteral(self) orelse return null;
+        const op = try parseBinOperator(self) orelse return null;
+        const right = try parseLiteral(self) orelse return null;
 
         const binary = try self.alloc.create(Expr.BinaryExpr);
         binary.* = .{
-            .left = left.?,
-            .op = op.?,
-            .right = right.?,
+            .left = left,
+            .op = op,
+            .right = right,
         };
 
         return Expr{ .binary = binary };
     }
 
     fn retStmt(self: *Parser) !?Stmt {
-        if (try advance(self, .RETURN, "expected 'return'") == null) return null;
+        try advance(self, .RETURN, "expected 'return'") orelse return null;
         
-        const ret_value = try parseLiteral(self);
-        if (ret_value == null) return null;
-
-        if (try advance(self, .SEMICOLON, "expected ';' as line break") == null) return null;
+        const ret_value = try parseLiteral(self) orelse return null;
+        
+        try advance(self, .SEMICOLON, "expected ';' as line break") orelse return null;
 
         return Stmt{ .ret_stmt = .{
-            .value = ret_value.?,
+            .value = ret_value,
         }};
     }
 
     fn functionCall(self: *Parser) !?Stmt {
-        const ident = try parseLiteral(self);
+        const ident = try parseLiteral(self) orelse return null;
 
-        if (try advance(self, .LEFT_PAREN, "expected '('") == null) return null;
+        try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
 
-        const arg = try parseLiteral(self); // just one arg right now
+        const arg = try parseLiteral(self) orelse return null; // just one arg right now
 
-        if (try advance(self, .RIGHT_PAREN, "expected ')'") == null) return null;
-        if (try advance(self, .SEMICOLON, "expected ';'") == null) return null;
-
-        if (ident == null or arg == null) return null;
+        try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         const call = try self.alloc.create(Expr.CallExpr);
         call.* = .{
-            .func_name = ident.?,
-            .args = arg.?,
+            .func_name = ident,
+            .args = arg,
             .func_symbol = null,
             .ret_type = null,  
         };
@@ -402,66 +390,61 @@ pub const Parser = struct {
     fn variableDecl(self: *Parser) !?Stmt {
         var mutable = false;
 
-        if (try advance(self, .LET, null) == null) return null;
+        try advance(self, .LET, null) orelse return null;
         
         if (getCurrentTokenType(self) == .MUT) {
             mutable = true;
-            if (try advance(self, .MUT, null) == null) return null;
+            try advance(self, .MUT, null) orelse return null;
         }
 
-        const var_name = try parseLiteral(self);
-        if (try advance(self, .COLON, "expected ':'") == null) return null;
+        const var_name = try parseLiteral(self) orelse return null;
+        try advance(self, .COLON, "expected ':'") orelse return null;
         
-        const var_type = try parseType(self);
+        const var_type = try parseType(self) orelse return null;
 
-        if (try advance(self, .EQUAL, "expected '='") == null) return null;
+        try advance(self, .EQUAL, "expected '='") orelse return null;
 
-        const value = try parseLiteral(self);
+        const value = try parseLiteral(self) orelse return null;
 
-        if (try advance(self, .SEMICOLON, "expected ';'") == null) return null;
-
-        if (var_name == null or var_type == null or value == null) return null;
+        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         return Stmt{ .var_decl = .{
             .mutable = mutable,
-            .name = var_name.?,
-            .value = Expr{ .literal = value.?.literal },
+            .name = var_name,
+            .value = Expr{ .literal = value.literal },
             .var_type = TypeAnnotation{ .named = .{
-                .primitive = var_type.?,
+                .primitive = var_type,
             }},
             .symbol = null,
         }};
     }
 
     fn externFnDeclaration(self: *Parser) !?Stmt {
-        if (try advance(self, .EXTERN, null) == null) return null;
-        if (try advance(self, .FN, "expected 'fn'") == null) return null;
+        try advance(self, .EXTERN, null) orelse return null;
+        try advance(self, .FN, "expected 'fn'") orelse return null;
 
-        const lit = try parseLiteral(self);
+        const lit = try parseLiteral(self) orelse return null;
         
-        if (try advance(self, .LEFT_PAREN, "expected ')'") == null) return null;
-        if (try advance(self, .IDENTIFIER, null) == null) return null;
-        if (try advance(self, .COLON, "expected ':'") == null) return null;
+        try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
+        try advance(self, .IDENTIFIER, null) orelse return null;
+        try advance(self, .COLON, "expected ':'") orelse return null;
 
-        const arg_type = try parseType(self);
+        const arg_type = try parseType(self) orelse return null;
         
-        if (try advance(self, .RIGHT_PAREN, "expected ')'") == null) return null;
-        if (try advance(self, .RIGHT_ARROW, "expected '->'") == null) return null; // TODO change to '=>'
+        try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+        try advance(self, .RIGHT_ARROW, "expected '->'") orelse return null; // TODO change to '=>'
 
-        const ret_type = try parseType(self);
+        const ret_type = try parseType(self) orelse return null;
 
-        if (try advance(self, .SEMICOLON, "expected ';'") == null) return null;
-
-        // TODO can these be replaced with 'orelse'?
-        if (lit == null or arg_type == null or ret_type == null) return null;
+        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         return Stmt{ .extern_fn_decl = .{
-            .name = lit.?,
+            .name = lit,
             .arg_type = TypeAnnotation{ .named = .{
-                .primitive = arg_type.?,
+                .primitive = arg_type,
             }},
             .ret_type = TypeAnnotation{ .named = .{
-                .primitive = ret_type.?,
+                .primitive = ret_type,
             }},
             .symbol = null,
         }};
@@ -473,68 +456,68 @@ pub const Parser = struct {
 
         switch (op.token_type) {
             .PLUS => {
-                if (try advance(self, .PLUS, m) == null) return null;
+                try advance(self, .PLUS, m) orelse return null;
                 return .ADD;   
             },
             .MINUS => {
-                if (try advance(self, .MINUS, m) == null) return null;
+                try advance(self, .MINUS, m) orelse return null;
                 return .SUB;
             },
             .STAR => {
-                if (try advance(self, .STAR, m) == null) return null;
+                try advance(self, .STAR, m) orelse return null;
                 return .MUL;
             },
             .SLASH => {
-                if (try advance(self, .SLASH, m) == null) return null;
+                try advance(self, .SLASH, m) orelse return null;
                 return .DIV;  
             },
             .GREATER => {
-                if (try advance(self, .GREATER, m) == null) return null;
+                try advance(self, .GREATER, m) orelse return null;
                 return .GREATER;
             },
             .LESS => {
-                if (try advance(self, .LESS, m) == null) return null;
+                try advance(self, .LESS, m) orelse return null;
                 return .LESS;
             },
             .EQUAL => {
-                if (try advance(self, .EQUAL, m) == null) return null;
+                try advance(self, .EQUAL, m) orelse return null;
                 return .EQUAL;
             },
             .BANG_EQUAL => {
-                if (try advance(self, .BANG_EQUAL, m) == null) return null;
+                try advance(self, .BANG_EQUAL, m) orelse return null;
                 return .NOT_EQUAL;
             },
             .EQUAL_EQUAL => {
-                if (try advance(self, .EQUAL_EQUAL, m) == null) return null;
+                try advance(self, .EQUAL_EQUAL, m) orelse return null;
                 return .EQUAL_EQUAL;
             },
             .LESS_EQUAL => {
-                if (try advance(self, .LESS_EQUAL, m) == null) return null;
+                try advance(self, .LESS_EQUAL, m) orelse return null;
                 return .LESS_EQUAL;
             },
             .GREATER_EQUAL => {
-                if (try advance(self, .GREATER_EQUAL, m) == null) return null;
+                try advance(self, .GREATER_EQUAL, m) orelse return null;
                 return .GREATER_EQUAL;
             },
             .PLUS_EQUAL => {
-                if (try advance(self, .PLUS_EQUAL, m) == null) return null;
+                try advance(self, .PLUS_EQUAL, m) orelse return null;
                 return .ADD_EQUAL;
             },
             .MINUS_EQUAL => {
-                if (try advance(self, .MINUS_EQUAL, m) == null) return null;
+                try advance(self, .MINUS_EQUAL, m) orelse return null;
                 return .SUB_EQUAL;
             },
             .STAR_EQUAL => {
-                if (try advance(self, .STAR_EQUAL, m) == null) return null;
+                try advance(self, .STAR_EQUAL, m) orelse return null;
                 return .MUL_EQUAL;
             },
             .SLASH_EQUAL => {
-                if (try advance(self, .SLASH_EQUAL, m) == null) return null;
+                try advance(self, .SLASH_EQUAL, m) orelse return null;
                 return .DIV_EQUAL;
             },
             else => {
                 try collectError(self, "expected an operator", try previousToken(self));
-                if (try advanceSync(self) == null) return null;
+                try advanceSync(self) orelse return null;
             },
         }
         return null;
@@ -546,62 +529,62 @@ pub const Parser = struct {
 
         switch (curr.token_type) {
             .C_INT => {
-                if (try advance(self, .C_INT, m) == null) return null;
+                try advance(self, .C_INT, m) orelse return null;
                 return .c_int;
             },
             .UINT8 => {
-                if (try advance(self, .UINT8, m) == null) return null;
+                try advance(self, .UINT8, m) orelse return null;
                 return .u8;
             },
             .UINT16 => {
-                if (try advance(self, .UINT16, m) == null) return null;
+                try advance(self, .UINT16, m) orelse return null;
                 return .u16;
             },
             .UINT32 => {
-                if (try advance(self, .UINT32, m) == null) return null;
+                try advance(self, .UINT32, m) orelse return null;
                 return .u32;  
             },
             .UINT64 => {
-                if (try advance(self, .UINT64, m) == null) return null;
+                try advance(self, .UINT64, m) orelse return null;
                 return .u64;  
             },
             .INT8 => {
-                if (try advance(self, .INT8, m) == null) return null;
+                try advance(self, .INT8, m) orelse return null;
                 return .i8;  
             },
             .INT16 => {
-                if (try advance(self, .INT16, m) == null) return null;
+                try advance(self, .INT16, m) orelse return null;
                 return .i16;  
             },
             .INT32 => {
-                if (try advance(self, .INT32, m) == null) return null;
+                try advance(self, .INT32, m) orelse return null;
                 return .i32;  
             },
             .INT64 => {
-                if (try advance(self, .INT64, m) == null) return null;
+                try advance(self, .INT64, m) orelse return null;
                 return .i64;
             },
             .FLOAT32 => {
-                if (try advance(self, .FLOAT32, m) == null) return null;
+                try advance(self, .FLOAT32, m) orelse return null;
                 return .f32;  
             },
             .FLOAT64 => {
-                if (try advance(self, .FLOAT64, m) == null) return null;
+                try advance(self, .FLOAT64, m) orelse return null;
                 return .f64;  
             },
             .BOOL => {
-                if (try advance(self, .BOOL, m) == null) return null;
+                try advance(self, .BOOL, m) orelse return null;
                 return .bool;  
             },
             .VOID => {
-                if (try advance(self, .VOID, m) == null) return null;
+                try advance(self, .VOID, m) orelse return null;
                 return .void;
             },
             else => {
                 // TODO see if taking previous token causes further issues, currently
                 // it fixes some related to wrong error msgs
                 try collectError(self, "expected a type", try previousToken(self));
-                if (try synchronize(self) == null) return null;
+                try synchronize(self) orelse return null;
             },
         }
         return null;
@@ -614,31 +597,31 @@ pub const Parser = struct {
         switch (curr.token_type) {
             .IDENTIFIER => {
                 lit_type = .identifier;
-                if (try advance(self, .IDENTIFIER, "expected an identifier") == null) return null;
+                try advance(self, .IDENTIFIER, "expected an identifier") orelse return null;
             },
             .INTEGER => {
                 lit_type = .int;
-                if (try advance(self, .INTEGER, "expected an integer") == null) return null;
+                try advance(self, .INTEGER, "expected an integer") orelse return null;
             },
             .FLOAT => {
                 lit_type = .float;
-                if (try advance(self, .FLOAT, "expected a float") == null) return null;  
+                try advance(self, .FLOAT, "expected a float") orelse return null; 
             },
             .BOOL => {
                 lit_type = .boolean;
-                if (try advance(self, .BOOL, "expected a boolean") == null) return null;
+                try advance(self, .BOOL, "expected a boolean") orelse return null;
             },
             .STRING => {
                 lit_type = .string;
-                if (try advance(self, .STRING, "expected a string") == null) return null;  
+                try advance(self, .STRING, "expected a string") orelse return null;  
             },
             .CHARACTER => {
                 lit_type = .int;
-                if (try advance(self, .CHARACTER, "expected a character") == null) return null;  
+                try advance(self, .CHARACTER, "expected a character") orelse return null;  
             },
             else => {
                 try collectError(self, "expected a literal", try previousToken(self));
-                if (try advanceSync(self) == null) return null;
+                try advanceSync(self) orelse return null;
             },
         }
 
@@ -664,11 +647,11 @@ pub const Parser = struct {
         }
         if (getCurrentTokenType(self) != token_type) {
             try collectError(self, msg, try previousToken(self));
-            if (try synchronize(self) == null) return null;
+            try synchronize(self) orelse return null;
             return null;
         }
         if (token_type.category() == .KEYWORD) {
-            if (try checkKeyword(self, currToken(self)) == null) return null;
+            try checkKeyword(self, currToken(self)) orelse return null;
         }
         self.current += 1;
     }
@@ -689,7 +672,7 @@ pub const Parser = struct {
                 const next = try nextToken(self);
                 if (next.token_type != .FN) {
                     try collectError(self, "expected 'fn'", try previousToken(self));
-                    if (try synchronize(self) == null) return null;
+                    try synchronize(self) orelse return null;
                     return null;
                 }
             },
@@ -738,10 +721,10 @@ pub const Parser = struct {
     fn synchronize(self: *Parser) anyerror!?void {
         while (!isAtEnd(self)) {
             if (getCurrentTokenType(self) == .SEMICOLON) {
-                if (try advance(self, .SEMICOLON, null) == null) return null;
+                try advance(self, .SEMICOLON, null) orelse return null;
                 return;
             }
-
+            
             switch (getCurrentTokenType(self)) {
                 .FN => return,
                 .FOR => return,
@@ -749,9 +732,7 @@ pub const Parser = struct {
                 .IF => return,
                 .RETURN => return,
                 .LET => return,
-                //.LEFT_BRACE => return,
-                //.RIGHT_BRACE => return,
-                .EXTERN => return,
+                .EXTERN => return, // this is here just for now
                 // etc...
                 else => {},
             }
