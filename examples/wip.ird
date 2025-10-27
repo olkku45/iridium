@@ -1,6 +1,6 @@
-extern fn putchar(c: c_int) -> c_int; // need this so the println works lol
+extern fn putchar(c: c_int) => c_int; // need this so the println works lol
 
-fn main() -> c_int {
+fn main() => c_int {
 	let mut x: c_int = 48;
 
 	if (x > 0) {

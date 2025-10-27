@@ -179,7 +179,6 @@ pub const LiteralType = enum {
     string,
 };
 
-// TODO: fix error messages' info being after the synchronization for some reason
 pub const Diagnostic = struct {
     msg: ?[]const u8,
     severity: enum { err, warn, info },
@@ -262,7 +261,6 @@ pub const Parser = struct {
     fn parseBlock(self: *Parser) !?[]Stmt {
         var stmt_list: std.array_list.Aligned(Stmt, null) = .empty;
 
-        // TODO fix, this gives a weird error message sometimes
         try advance(self, .LEFT_BRACE, "expected '{'") orelse return null;
 
         while (getCurrentTokenType(self) != .RIGHT_BRACE) {
@@ -294,7 +292,7 @@ pub const Parser = struct {
         // no params for now
 
         try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
-        try advance(self, .RIGHT_ARROW, "expected '->'") orelse return null; // TODO change to '=>'
+        try advance(self, .RIGHT_ARROW, "expected '=>'") orelse return null;
 
         const ret_type = try parseType(self) orelse return null;
         const func_body = try parseBlock(self) orelse return null;
@@ -432,7 +430,7 @@ pub const Parser = struct {
         const arg_type = try parseType(self) orelse return null;
         
         try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
-        try advance(self, .RIGHT_ARROW, "expected '->'") orelse return null; // TODO change to '=>'
+        try advance(self, .RIGHT_ARROW, "expected '=>'") orelse return null;
 
         const ret_type = try parseType(self) orelse return null;
 

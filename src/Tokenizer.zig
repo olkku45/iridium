@@ -355,10 +355,6 @@ pub const Tokenizer = struct {
             ',' => try addToken(self, .COMMA, alloc),
             '.' => try addToken(self, .DOT, alloc),
             '-' => {
-                if (match(self, '>')) {
-                    try addToken(self, .RIGHT_ARROW, alloc);
-                    return;
-                }
                 if (match(self, '=')) try addToken(self, .MINUS_EQUAL, alloc)
                 else try addToken(self, .MINUS, alloc);
             },
@@ -389,7 +385,14 @@ pub const Tokenizer = struct {
             ':' => try addToken(self, .COLON, alloc),
 
             '!' => if (match(self, '=')) try addToken(self, .BANG_EQUAL, alloc) else try addToken(self, .BANG, alloc),
-            '=' => if (match(self, '=')) try addToken(self, .EQUAL_EQUAL, alloc) else try addToken(self, .EQUAL, alloc),
+            '=' => {
+                if (match(self, '>')) {
+                    try addToken(self, .RIGHT_ARROW, alloc);
+                    return;
+                }
+                if (match(self, '=')) try addToken(self, .EQUAL_EQUAL, alloc)
+                else try addToken(self, .EQUAL, alloc);
+            },
             '>' => if (match(self, '=')) try addToken(self, .GREATER_EQUAL, alloc) else try addToken(self, .GREATER, alloc),
             '<' => if (match(self, '=')) try addToken(self, .LESS_EQUAL, alloc) else try addToken(self, .LESS, alloc),
 

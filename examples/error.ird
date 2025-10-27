@@ -1,4 +1,4 @@
-fn main() -> pekka {
+fn main() => pekka {
 	pekka
 
 	extern fn putchar(c:
