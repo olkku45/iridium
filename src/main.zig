@@ -10,7 +10,6 @@ const print = std.debug.print;
 
 const Error = error{
     NotIridiumFile,
-
 };
 
 pub const Span = struct {

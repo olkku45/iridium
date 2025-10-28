@@ -91,108 +91,6 @@ pub const TokenType = enum {
     AS,
     TRY,
     PUB,
-
-    // TODO: remove categories as they aren't needed
-    pub const Category = enum {
-        KEYWORD,
-        OPERATOR,
-        TYPE,
-        CHARACTER,
-        IDENTIFIER,
-    };
-
-    pub fn category(self: TokenType) Category {
-        return switch (self) {
-            .USE,
-            .LET,
-            .MUT,
-            .CONST,
-            .GLOBAL,
-            .FN,
-            .FOR,
-            .WHILE,
-            .RETURN,
-            .STRUCT,
-            .ENUM,
-            .UNION,
-            .CONTINUE,
-            .BREAK,
-            .SWITCH,
-            .IF,
-            .ELSE,
-            .STD,
-            .LIB,
-            .EXTERN,
-            .CATCH,
-            .ASSERT,
-            .SUPPRESS,
-            .EXCLUDE,
-            .THROW,
-            .IN,
-            .AS,
-            .TRY,
-            .PUB,
-            => .KEYWORD,
-            
-            .MINUS,
-            .PLUS,
-            .SLASH,
-            .STAR,
-            .QUERY,
-            .BANG,
-            .BANG_EQUAL,
-            .EQUAL,
-            .EQUAL_EQUAL,
-            .GREATER,
-            .GREATER_EQUAL,
-            .LESS,
-            .LESS_EQUAL,
-            .PLUS_EQUAL,
-            .MINUS_EQUAL,
-            .STAR_EQUAL,
-            .SLASH_EQUAL,
-            .RIGHT_ARROW,
-            .AND,
-            .OR,
-            => .OPERATOR,
-
-            .UINT8,
-            .UINT16,
-            .UINT32,
-            .UINT64,
-            .INT8,
-            .INT16,
-            .INT32,
-            .INT64,
-            .FLOAT32,
-            .FLOAT64,
-            .BOOL,
-            .VOID,
-            .INTEGER,
-            .FLOAT,
-            .STRING,
-            .CHARACTER,
-            .C_INT,
-            .C_FLOAT,
-            .C_DOUBLE,
-            .C_CHAR,
-            => .TYPE,
-
-            .LEFT_PAREN,
-            .RIGHT_PAREN,
-            .LEFT_BRACKET,
-            .RIGHT_BRACKET,
-            .LEFT_BRACE,
-            .RIGHT_BRACE,
-            .COMMA,
-            .DOT,
-            .COLON,
-            .SEMICOLON,
-            => .CHARACTER,
-
-            .IDENTIFIER => .IDENTIFIER,
-        };
-    }
 };
 
 pub const Token = struct {
@@ -355,10 +253,6 @@ pub const Tokenizer = struct {
             ',' => try addToken(self, .COMMA, alloc),
             '.' => try addToken(self, .DOT, alloc),
             '-' => {
-                if (match(self, '>')) {
-                    try addToken(self, .RIGHT_ARROW, alloc);
-                    return;
-                }
                 if (match(self, '=')) try addToken(self, .MINUS_EQUAL, alloc)
                 else try addToken(self, .MINUS, alloc);
             },
@@ -389,7 +283,14 @@ pub const Tokenizer = struct {
             ':' => try addToken(self, .COLON, alloc),
 
             '!' => if (match(self, '=')) try addToken(self, .BANG_EQUAL, alloc) else try addToken(self, .BANG, alloc),
-            '=' => if (match(self, '=')) try addToken(self, .EQUAL_EQUAL, alloc) else try addToken(self, .EQUAL, alloc),
+            '=' => {
+                if (match(self, '>')) {
+                    try addToken(self, .RIGHT_ARROW, alloc);
+                    return;
+                }
+                if (match(self, '=')) try addToken(self, .EQUAL_EQUAL, alloc)
+                else try addToken(self, .EQUAL, alloc);
+            },
             '>' => if (match(self, '=')) try addToken(self, .GREATER_EQUAL, alloc) else try addToken(self, .GREATER, alloc),
             '<' => if (match(self, '=')) try addToken(self, .LESS_EQUAL, alloc) else try addToken(self, .LESS, alloc),
 

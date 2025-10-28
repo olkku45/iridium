@@ -1,6 +1,6 @@
-extern fn putchar(c: c_int) -> c_int;
+extern fn putchar(c: c_int) => c_int;
 
-fn main() -> c_int {
+fn main() => c_int {
 	putchar('H');
 	putchar('e');
 	putchar('l');
