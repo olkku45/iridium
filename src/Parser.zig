@@ -648,9 +648,6 @@ pub const Parser = struct {
             try synchronize(self) orelse return null;
             return null;
         }
-        if (token_type.category() == .KEYWORD) {
-            try checkKeyword(self, currToken(self)) orelse return null;
-        }
         self.current += 1;
     }
 
@@ -662,21 +659,6 @@ pub const Parser = struct {
             return null;
         }
         self.current += 1;
-    }
-
-    fn checkKeyword(self: *Parser, token: Token) !?void {
-        switch (token.token_type) {
-            .EXTERN => {
-                const next = try nextToken(self);
-                if (next.token_type != .FN) {
-                    try collectError(self, "expected 'fn'", try previousToken(self));
-                    try synchronize(self) orelse return null;
-                    return null;
-                }
-            },
-            // etc...
-            else => {},
-        }
     }
 
     fn currToken(self: *Parser) Token {
@@ -730,7 +712,7 @@ pub const Parser = struct {
                 .IF => return,
                 .RETURN => return,
                 .LET => return,
-                .EXTERN => return, // this is here just for now
+                .EXTERN => return,
                 // etc...
                 else => {},
             }
