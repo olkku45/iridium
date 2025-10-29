@@ -239,6 +239,9 @@ pub const Analyzer = struct {
                 .expr_stmt =>  {
                     //try checkCallExpr(self, s);
                 },
+                .while_loop => {
+                    //try checkWhileLoop(self, s);  
+                },
                 else => {},
             }
         }

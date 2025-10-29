@@ -23,7 +23,7 @@ pub const AstPrinter = struct {
         }
     }
 
-    fn printNode(self: *AstPrinter, stmt: Stmt) !void {
+    fn printNode(self: *AstPrinter, stmt: Stmt) anyerror!void {
         switch (stmt) {
             .if_stmt => try printIfStmt(self, stmt),
             .extern_fn_decl => try printExternDecl(self, stmt),
@@ -31,6 +31,7 @@ pub const AstPrinter = struct {
             .var_decl => try printVarDecl(self, stmt),
             .expr_stmt => try printExprStmt(self, stmt),
             .ret_stmt => try printRetStmt(self, stmt),
+            .while_loop => try printWhileLoop(self, stmt),
             .error_node => try printError(self),
         }
     }
@@ -41,6 +42,30 @@ pub const AstPrinter = struct {
         while (i < self.indent_level * self.indent_size) : (i += 1) {
             try self.writer.writeByte(' ');
         }
+    }
+
+    fn printWhileLoop(self: *AstPrinter, stmt: Stmt) !void {
+        try self.writeIndent();
+        try self.writer.writeAll("While\n");
+
+        self.indent();
+
+        try self.writeIndent();
+        try self.writer.writeAll("Condition:\n");
+        self.indent();
+        try self.writer.writeAll(stmt.while_loop.cond.literal.value);
+        self.dedent();
+
+        try self.writeIndent();
+        try self.writer.writeAll("Body:\n");
+        self.indent();
+
+        for (stmt.while_loop.body) |item| {
+            try self.printNode(item);
+        }
+
+        self.dedent();
+        self.dedent();
     }
 
     fn printError(self: *AstPrinter) !void {

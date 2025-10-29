@@ -196,8 +196,8 @@ pub const CodeGen = struct {
                     const evaluated = try generateExpr(self, if_stmt.condition);
 
                     _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
-        
                     c.LLVMPositionBuilderAtEnd(self.builder, then_block);
+                    
                     for (if_stmt.if_body) |item| {
                         switch (item) {
                             .expr_stmt => |expr_stmt| {
@@ -216,11 +216,43 @@ pub const CodeGen = struct {
                         }
                     }
                     _ = c.LLVMBuildBr(self.builder, merge_block);
-
                     c.LLVMPositionBuilderAtEnd(self.builder, else_block);
-                    _ = c.LLVMBuildBr(self.builder, merge_block);
                     
+                    _ = c.LLVMBuildBr(self.builder, merge_block);
                     c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
+                },
+                .while_loop => |while_loop| {
+                    const cond_block = c.LLVMAppendBasicBlock(func, "while-cond");
+                    const body_block = c.LLVMAppendBasicBlock(func, "while-body");
+                    const end_block = c.LLVMAppendBasicBlock(func, "while-end");
+
+                    _ = c.LLVMBuildBr(self.builder, cond_block);
+
+                    c.LLVMPositionBuilderAtEnd(self.builder, cond_block);
+                    const eval_cond = try generateExpr(self, while_loop.cond);
+                    _ = c.LLVMBuildCondBr(self.builder, eval_cond, body_block, end_block);
+
+                    c.LLVMPositionBuilderAtEnd(self.builder, body_block);
+                    for (while_loop.body) |item| {
+                        switch (item) {
+                            .expr_stmt => |expr| {
+                                const call = expr.expr.func_call.*;
+                                const arg = call.args; // one arg
+
+                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
+                                    for (0..arg.literal.value.len) |i| {
+                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
+                                        createPutcharCall(self, arg.literal.value[i]);
+                                    }
+                                    createPutcharCall(self, '\n');
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                    _ = c.LLVMBuildBr(self.builder, cond_block);
+
+                    c.LLVMPositionBuilderAtEnd(self.builder, end_block);
                 },
                 else => {},
             }
@@ -254,6 +286,12 @@ pub const CodeGen = struct {
 
     fn generateLiteral(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
         if (lit.type == .identifier) {
+            if (std.mem.eql(u8, lit.value, "true")) {
+                return c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 1, 0);
+            } else if (std.mem.eql(u8, lit.value, "false")) {
+                return c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 0, 0);
+            }
+
             const alloca = self.symbols.get(lit.value);
 
             var buf: [200]u8 = undefined;
