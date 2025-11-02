@@ -1,13 +1,8 @@
-// DOESN'T WORK YET
 extern fn putchar(c: c_int) => c_int;
 
 fn main() => c_int {
-	let mut x: c_int = 0;
-
-	while (x < 5) {
+	while (true) {
 		println("hello");
-
-		x += 1;
 	}
 	
 	return 0;
