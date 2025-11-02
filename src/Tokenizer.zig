@@ -51,6 +51,8 @@ pub const TokenType = enum {
     FLOAT32,
     FLOAT64,
     BOOL,
+    TRUE,
+    FALSE,
     VOID,
     INTEGER,
     FLOAT,
@@ -150,7 +152,9 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("i64", .INT64);
     try keywords.put("f32", .FLOAT32);
     try keywords.put("f64", .FLOAT64);
-    try keywords.put("bool", .BOOL);
+    try keywords.put("bool", .BOOL); // type marker
+    try keywords.put("true", .TRUE);
+    try keywords.put("false", .FALSE);
     try keywords.put("void", .VOID);
     try keywords.put("c_int", .C_INT);
     try keywords.put("c_float", .C_FLOAT);
@@ -204,7 +208,6 @@ pub const Tokenizer = struct {
         //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
 
         switch (char) {
-            // TODO: switch to parser, when we eat token we check what that is
             '\n' => {
                 if (try prevChar(self) != ' ' and
                 try prevChar(self) != ';' and
@@ -230,7 +233,6 @@ pub const Tokenizer = struct {
         try self.tokens.append(allocator, Token{
             .lexeme = token_value,
             .token_type = token_type,
-            // get col info from start of token
             .span = Span{
                 .start_col = self.col - text.len,
                 .end_col = self.col,

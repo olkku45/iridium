@@ -1,0 +1,11 @@
+extern fn putchar(c: c_int) => c_int;
+
+fn main() => c_int {
+	while (x) {
+		println("x is defined");
+	}
+
+	let y: c_int = 10; // unused variable warning
+
+	return 0;
+}

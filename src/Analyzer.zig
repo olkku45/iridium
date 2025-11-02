@@ -1,43 +1,26 @@
 const std = @import("std");
-const Span = @import("main.zig").Span;
 const Stmt = @import("Parser.zig").Stmt;
+const Span = @import("main.zig").Span;
 const Expr = @import("Parser.zig").Expr;
-const TypeAnnotation = @import("Parser.zig").TypeAnnotation;
-const LiteralType = @import("Parser.zig").LiteralType;
-const c = @import("llvm.zig").c;
 const print = std.debug.print;
 
-const AnalysisError = error{
-    DuplicateVariable,
-    VariableOutOfScope,
-    WrongArgType,  
+const Diagnostic = struct {
+    msg: ?[]const u8,
+    severity: enum { err, warn, info },
+    //stmt: Stmt,
+    value: []const u8,
+    span: Span,
 };
 
-pub const TypeId = union(enum) {
-    const id = u32;
-
-    pub const TYPE_VOID: id = 0;
-    pub const TYPE_BOOL: id = 1;
-    pub const TYPE_I8: id = 2;
-    pub const TYPE_I16: id = 3;
-    pub const TYPE_I32: id = 4;
-    pub const TYPE_I64: id = 5;
-    pub const TYPE_U8: id = 6;
-    pub const TYPE_U16: id = 7;
-    pub const TYPE_U32: id = 8;
-    pub const TYPE_U64: id = 9;
-    pub const TYPE_F32: id = 10;
-    pub const TYPE_F64: id = 11;
-
-    // user defined types...
-};
+fn initDiagnostics() std.array_list.Aligned(Diagnostic, null) {
+    const diagnostics: std.array_list.Aligned(Diagnostic, null) = .empty;
+    return diagnostics;
+}
 
 pub const SymbolType = enum {
     variable,
     function,
-    parameter,
-    argument,
-    externfn, 
+    externfn,   
 };
 
 pub const Symbol = struct {
@@ -45,12 +28,12 @@ pub const Symbol = struct {
     value: []const u8,
     mutable: ?bool,
     symbol_type: SymbolType,
-    llvm_value: ?*c.LLVMValueRef,
-    data_type: TypeAnnotation,
+    ref_count: *u32,
+    stmt: Stmt,
 };
 
 pub const Scope = struct {
-    symbols: ?std.StringHashMap(Symbol),
+    symbols: std.StringHashMap(Symbol),
     parent: ?*Scope,  
 };
 
@@ -62,9 +45,8 @@ pub const SymbolTable = struct {
         const scope = try allocator.create(Scope);
         scope.* = Scope{
             .parent = null,
-            .symbols = std.StringHashMap(Symbol).init(allocator),
+            .symbols = std.StringHashMap(Symbol).init(allocator),  
         };
-
         return SymbolTable{
             .current_scope = scope,
             .allocator = allocator,  
@@ -84,73 +66,64 @@ pub const SymbolTable = struct {
         var old_scope = self.current_scope;
         self.current_scope = old_scope.parent.?;
 
-        old_scope.symbols.?.deinit();
+        old_scope.symbols.deinit();
         self.allocator.destroy(old_scope);
     }
 
     pub fn lookupItem(self: *SymbolTable, name: []const u8) ?Symbol {
-        var scope = self.current_scope.*;
+        var scope: ?*Scope = self.current_scope;
 
-        while (scope.symbols != null) {
-            if (scope.symbols.?.get(name)) |symbol| {
+        //print("looking up {s}\n", .{name});
+        
+        while (scope) |current| {
+            if (current.symbols.get(name)) |symbol| {
+                //print("lookup succeeded.\n", .{});
                 return symbol;
             }
-            scope = scope.parent.?.*;
+            scope = current.parent;
         }
 
-        return null;
-    }
-
-    pub fn lookupItemCurrentScope(self: *SymbolTable, name: []const u8) ?Symbol {
-        const scope = self.current_scope.*;
-
-        if (scope.symbols.?.get(name)) |symbol| {
-            return symbol;
-        }
+        //print("lookup failed. for initializations this is good.\n", .{});
         
         return null;
     }
 
-    pub fn addItemToCurrentScope(self: *SymbolTable, name: []const u8, item: Symbol) !void {
-        if (self.current_scope.*.symbols.?.contains(name)) {
-            try reportError(item);
-            return AnalysisError.DuplicateVariable;
+    pub fn lookupItemCurrentScope(self: *SymbolTable, name: []const u8) !void {
+        const scope = self.current_scope.*;
+        if (scope.symbols.get(name)) |symbol| {
+            return symbol;
         }
-        try self.current_scope.*.symbols.?.put(name, item);
+        return null;
     }
 
-    // TODO: remove?
-    pub fn reportError(item: Symbol) !void {
-        print("Line {d}: Col {d}-{d} | ", .{item.span.line, item.span.start_col, item.span.end_col});
+    pub fn addItemToScope(self: *SymbolTable, name: []const u8, item: Symbol) !void {
+        try self.current_scope.*.symbols.put(name, item);
     }
 };
 
 pub const Analyzer = struct {
     ast: []Stmt,
     symbol_table: SymbolTable,
-    allocator: std.mem.Allocator,
-
-    pub const Result = struct {
-        ast: []Stmt,
-        st: SymbolTable,
-    };
+    alloc: std.mem.Allocator,
+    diagnostics: std.array_list.Aligned(Diagnostic, null),
 
     pub fn init(ast: []Stmt, allocator: std.mem.Allocator) !Analyzer {
         return Analyzer{
             .ast = ast,
             .symbol_table = try SymbolTable.init(allocator),
-            .allocator = allocator,  
+            .alloc = allocator,
+            .diagnostics = initDiagnostics(),
         };
     }
 
-    pub fn analyzeAst(self: *Analyzer) !Result {
-        for (0..self.ast.len) |i| {
-            try self.traverseTopStmt(self.ast[i]);
+    pub fn analyze(self: *Analyzer) !void {
+        try self.symbol_table.enterScope(); // 'program scope'
+        
+        for (self.ast) |top_stmt| {
+            try self.traverseTopStmt(top_stmt);
         }
-        return Result{
-            .ast = self.ast,
-            .st = self.symbol_table,  
-        };
+
+        self.symbol_table.exitScope();
     }
 
     fn traverseTopStmt(self: *Analyzer, stmt: Stmt) !void {
@@ -166,146 +139,232 @@ pub const Analyzer = struct {
     }
 
     fn checkExternDecl(self: *Analyzer, stmt: Stmt.ExternFnDecl) !void {
-        const decl_symbol = Symbol{
-            .llvm_value = null,
-            .symbol_type = .externfn,
+        const val = stmt.name.literal.value;
+        const ptr = try self.alloc.create(u32);
+        ptr.* = 0;
+        
+        const ext_decl_symbol = Symbol{
             .mutable = null,
             .span = stmt.name.literal.span,
-            .data_type = stmt.arg_type,
-            .value = stmt.name.literal.value,
+            .symbol_type = .externfn,
+            .value = val,
+            .ref_count = ptr,
+            .stmt = Stmt{ .extern_fn_decl = stmt },
         };
-
-        try self.symbol_table.addItemToCurrentScope(stmt.name.literal.value, decl_symbol);
-    }
-
-    // NOT USED YET
-    fn resolveNamedType(named: TypeAnnotation.NamedType) TypeId {
-        return switch (named) {
-            .primitive => |prim| switch (prim) {
-                .void => .TYPE_VOID,
-                .bool => .TYPE_BOOL,
-                .i8 => .TYPE_I8,
-                .i16 => .TYPE_I16,
-                .i32 => .TYPE_I32,
-                .i64 => .TYPE_I64,
-                .u8 => .TYPE_U8,
-                .u16 => .TYPE_U16,
-                .u32 => .TYPE_U32,
-                .u64 => .TYPE_U64,
-                .f32 => .TYPE_F32,
-                .f64 => .TYPE_F64,
-            },
-            else => {},
-        };
+        try self.symbol_table.addItemToScope(val, ext_decl_symbol);
     }
 
     fn checkFunction(self: *Analyzer, func: Stmt.FnDecl) !void {
-        try self.symbol_table.enterScope();
+        if (self.symbol_table.lookupItem(func.name.literal.value) != null) {
+            try collectError(
+                self,
+                "#24323 function with this name is already declared",
+                func.name.literal.value,
+                func.name.literal.span
+            );
+        }
         
-        for (func.fn_body) |stmt| {
-            switch (stmt) {
-                // TODO: 'checkVarDecl()', also this 'decl' could be
-                // shortened
-                .var_decl => |s| {
-                    const decl = Symbol{
-                        .llvm_value = null,
-                        .mutable = s.mutable,
-                        .data_type = s.var_type,
-                        .symbol_type = .variable,
-                        .value = s.value.literal.value,
-                        .span = Span{
-                            .start_col = s.value.literal.span.start_col,
-                            .end_col = s.value.literal.span.end_col,
-                            .line = s.value.literal.span.line,
-                            .source_file = null,  
-                        },
-                    };
-                    const name = s.name.literal.value;
+        try checkBlock(self, func.fn_body);
 
-                    if (self.symbol_table.lookupItemCurrentScope(name) != null) {
-                        reportLiteralError(s.name.literal);
-                        return AnalysisError.DuplicateVariable;
-                    }
-                    try self.symbol_table.addItemToCurrentScope(name, decl);
-                    //stmt.var_decl.symbol = decl; WARN: this doesn't work
+        const ptr = try self.alloc.create(u32);
+        ptr.* = 0;
+        
+        const fn_symbol = Symbol{
+            .mutable = null,
+            .ref_count = ptr,
+            .span = func.name.literal.span,
+            .stmt = Stmt{ .fn_decl = func },
+            .value = func.name.literal.value,
+            .symbol_type = .function,   
+        };
+        try self.symbol_table.addItemToScope(func.name.literal.value, fn_symbol);
+    }
+
+    fn checkRetStmt(self: *Analyzer, ret_stmt: Stmt.RetStmt) !void {
+        if (ret_stmt.value.literal.type == .identifier) {
+            const lookup = self.symbol_table.lookupItem(ret_stmt.value.literal.value);
+            if (lookup == null) {
+                try collectError(
+                    self,
+                    "#9852 variable not found",
+                    ret_stmt.value.literal.value,
+                    ret_stmt.value.literal.span
+                );
+            } else {
+                lookup.?.ref_count.* += 1;
+            }
+        }
+    }
+
+    fn checkBlock(self: *Analyzer, block: []Stmt) !void {
+        try self.symbol_table.enterScope();
+
+        for (block) |stmt| {
+            switch (stmt) {
+                .expr_stmt => |s| {
+                    try checkExpr(self, s.expr);
+                },
+                .extern_fn_decl => |s| {
+                    try collectError(
+                        self,
+                        "#09134 cannot define external function in block",
+                        s.name.literal.value,
+                        s.name.literal.span
+                    );
+                },
+                .fn_decl => |s| {
+                    try collectError(
+                        self,
+                        "#41310 nested functions not supported",
+                        s.name.literal.value,
+                        s.name.literal.span
+                    );
                 },
                 .if_stmt => |s| {
-                    try checkIfStmt(self, s);
+                    try checkExpr(self, s.condition);
+                    try checkBlock(self, s.if_body);
                 },
                 .ret_stmt => |s| {
-                    try checkRetStmt(self, s);  
+                    try checkRetStmt(self, s);
                 },
-                // currently just function calls here
-                .expr_stmt =>  {
-                    //try checkCallExpr(self, s);
+                .var_decl => |s| {
+                    try checkVarDecl(self, s);
                 },
-                .while_loop => {
-                    //try checkWhileLoop(self, s);  
+                .while_loop => |s| {
+                    try checkExpr(self, s.cond);
+                    try checkBlock(self, s.body);
                 },
-                else => {},
+                .error_node => {},
+            }
+        }
+
+        var it = self.symbol_table.current_scope.*.symbols.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.ref_count.* == 0) {
+                switch (entry.value_ptr.symbol_type) {
+                    .variable => {
+                        try collectWarning(
+                            self,
+                            "#4111 unused variable",
+                            entry.value_ptr.value,
+                            entry.value_ptr.span
+                        );
+                    },
+                    .function => {
+                        try collectWarning(
+                            self,
+                            "#841 unused function",
+                            entry.value_ptr.value,
+                            entry.value_ptr.span
+                        );
+                    },
+                    .externfn => {
+                        try collectWarning(
+                            self,
+                            "#109431 unused external function",
+                            entry.value_ptr.value,
+                            entry.value_ptr.span
+                        );
+                    },
+                }
             }
         }
 
         self.symbol_table.exitScope();
     }
 
-    // TODO: this type checking doesn't work, make it work somehow
-    //fn checkCallExpr(self: *Analyzer, stmt: Stmt.ExprStmt) void {
-    //    const call = stmt.expr.func_call.*;
-    //    
-    //    for (0..call.args.len) |i| {
-    //        const fn_type = call.args[i].literal.annotation.?.named.primitive;
-    //        const called = self.symbol_table.lookupItem(call.func_name.literal.value);
-    //        const called_type = called.?.data_type.named.primitive;
-
-    //        if (fn_type != called_type) {
-    //            reportLiteralError(call.func_name.literal);
-    //            return AnalysisError.WrongArgType;
-    //        }
-    //    }        
-    //}
-
-    // TODO: at some point check that
-    // the expression even evaluates to a boolean
-    fn checkIfStmt(self: *Analyzer, stmt: Stmt.IfStmt) !void {
-        try self.symbol_table.enterScope();
-
-        // currently just binary expressions
-        const cond = stmt.condition.binary.*;
-        const left = cond.left.literal;
-        const right = cond.right.literal;
-
-        if (left.type == .identifier) {
-            const lookup = self.symbol_table.lookupItem(left.value);
-            if (lookup == null) {
-                reportLiteralError(left);
-                return AnalysisError.VariableOutOfScope;
-            }
-        }
-        if (right.type == .identifier) {
-            const lookup = self.symbol_table.lookupItem(right.value);
-            if (lookup == null) {
-                reportLiteralError(right);
-                return AnalysisError.VariableOutOfScope;
-            }
-        }
-
-        // TODO: check the if body
-
-        self.symbol_table.exitScope();
-    }
-
-    fn checkRetStmt(self: *Analyzer, stmt: Stmt.RetStmt) !void {
-        if (stmt.value.literal.type == .identifier) {
-            const lookup = self.symbol_table.lookupItem(stmt.value.literal.value);
-            if (lookup == null) {
-                reportLiteralError(stmt.value.literal);
-                return AnalysisError.VariableOutOfScope;
-            }
+    fn checkExpr(self: *Analyzer, expr: Expr) !void {
+        switch (expr) {
+            .literal => |e| {
+                try checkLiteralExpr(self, e);
+            },
+            .binary => |e| {
+                try checkExpr(self, e.*.left);
+                try checkExpr(self, e.*.right);
+            },
+            else => {},
         }
     }
 
-    fn reportLiteralError(lit: Expr.Literal) void {
-        print("{d}:{d} : {s} | ", .{lit.span.line, lit.span.start_col, lit.value});
+    fn checkLiteralExpr(self: *Analyzer, lit_expr: Expr.Literal) !void {
+        if (lit_expr.type == .identifier) {
+            //print("#48239 ---{s}---\n", .{lit_expr.value});
+            const lookup = self.symbol_table.lookupItem(lit_expr.value);
+            if (lookup == null) {
+                try collectError(
+                    self,
+                    "#5913 variable not found",
+                    lit_expr.value,
+                    lit_expr.span
+                );
+            } else {
+                lookup.?.ref_count.* += 1;
+            }
+        }
+    }
+    
+    fn checkVarDecl(self: *Analyzer, decl: Stmt.VariableDecl) !void {
+        const lookup = self.symbol_table.lookupItem(decl.name.literal.value);
+        if (lookup != null) {
+            try collectError(
+                self,
+                "#59013 variable with this name already exists",
+                decl.name.literal.value,
+                decl.name.literal.span
+            );
+        }
+
+        // TODO generalize for different expr types
+        const val = decl.value.literal.value;
+        
+        if (decl.value.literal.type == .identifier) {
+            const lookup_value = self.symbol_table.lookupItem(val);
+            if (lookup_value == null) {
+                try collectError(
+                    self,
+                    "#1623 variable not found",
+                    val,
+                    decl.value.literal.span
+                );
+            } else {
+                lookup_value.?.ref_count.* += 1;
+            }
+        }
+
+        const ptr = try self.alloc.create(u32);
+        ptr.* = 0;
+
+        //print("#453529 variable name: '{s}'\n", .{decl.name.literal.value});
+        
+        const decl_symbol = Symbol{
+            .mutable = decl.mutable,
+            .span = decl.name.literal.span,
+            .value = decl.name.literal.value,
+            .symbol_type = .variable,
+            .ref_count = ptr,
+            .stmt = Stmt{ .var_decl = decl },
+        };
+
+        try self.symbol_table.addItemToScope(decl.name.literal.value, decl_symbol);
+    }
+
+    fn collectError(self: *Analyzer, msg: ?[]const u8, val: []const u8, span: Span) !void {
+        const diag = Diagnostic{
+            .msg = msg,
+            .severity = .err,
+            .span = span,
+            .value = val,
+        };
+        try self.diagnostics.append(self.alloc, diag);
+    }
+
+    fn collectWarning(self: *Analyzer, msg: ?[]const u8, val: []const u8, span: Span) !void {
+        const diag = Diagnostic{
+            .msg = msg,
+            .severity = .warn,
+            .value = val,
+            .span = span,
+        };
+        try self.diagnostics.append(self.alloc, diag);
     }
 };

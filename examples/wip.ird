@@ -1,7 +1,7 @@
 extern fn putchar(c: c_int) => c_int; // need this so the println works lol
 
 fn main() => c_int {
-	let mut x: c_int = 48;
+	let x: c_int = 48;
 
 	if (x > 0) {
 		println("x is greater than zero.");

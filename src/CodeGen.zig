@@ -45,8 +45,8 @@ pub const CodeGen = struct {
         c.LLVMContextDispose(self.context);
     }
 
-    pub fn compile(self: *CodeGen, res: Result) !void {
-        try generateProgramCode(self, res);
+    pub fn compile(self: *CodeGen, ast: []Stmt) !void {
+        try generateProgramCode(self, ast);
 
         c.LLVMInitializeAllTargetInfos();
         c.LLVMInitializeAllTargets();
@@ -107,9 +107,7 @@ pub const CodeGen = struct {
         c.LLVMDumpModule(self.module);
     }
 
-    fn generateProgramCode(self: *CodeGen, analyzed: Result) !void {
-        const ast = analyzed.ast;
-    
+    fn generateProgramCode(self: *CodeGen, ast: []Stmt) !void {
         for (ast) |item| {
             switch (item) {
                 .extern_fn_decl => {
