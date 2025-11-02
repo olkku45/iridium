@@ -58,8 +58,15 @@ pub fn main() !void {
         for (diagnostics) |diag| {
             switch (diag.severity) {
                 .err => {
-                    if (diag.msg == null) print("Error at line {d}: after '{s}'\n", .{diag.token.span.line, diag.token.lexeme})
-                    else print("Error at line {d}: {s}; after '{s}'\n", .{diag.token.span.line, diag.msg.?, diag.token.lexeme});
+                    if (diag.msg == null) {
+                        print(
+                            "Error at line {d}: after '{s}'\n",
+                            .{diag.token.span.line, diag.token.lexeme}
+                        );
+                    } else print(
+                        "Error at line {d}: {s}; after '{s}'\n",
+                        .{diag.token.span.line, diag.msg.?, diag.token.lexeme}
+                    );
                 },
                 else => {},
             }
@@ -67,7 +74,8 @@ pub fn main() !void {
         std.process.exit(0);
     }
     
-    var stdout_buffer: [100_000]u8 = undefined; // 100k chars max printed ast len now (arbitrary)
+    // 100k chars max printed ast len now (arbitrary)
+    var stdout_buffer: [100_000]u8 = undefined; 
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 
     const stdout = &stdout_writer.interface;
@@ -78,10 +86,38 @@ pub fn main() !void {
     try stdout.flush();
 
     var analyzer = try Analyzer.init(ast, allocator);
-    const analyzed = try analyzer.analyzeAst();
+    try analyzer.analyze();
+
+    if (analyzer.diagnostics.items.len > 0) {
+        for (analyzer.diagnostics.items) |diag| {
+            switch (diag.severity) {
+                .err => {
+                    if (diag.msg == null) {
+                        print(
+                            "Error at line {d}: from '{s}'\n",
+                            .{diag.span.line, diag.value}
+                        );
+                    } else print(
+                        "Error at line {d}: {s}; from '{s}'\n",
+                        .{diag.span.line, diag.msg.?, diag.value}
+                    );
+                },
+                .warn => {
+                    if (diag.msg != null) {
+                        print(
+                            "Warning at line {d}: {s}; from '{s}'\n",
+                            .{diag.span.line, diag.msg.?, diag.value}
+                        );
+                    }
+                },
+                .info => {},
+            }
+        }
+        std.process.exit(0);
+    }
 
     var code_gen = CodeGen.init(allocator);
-    try code_gen.compile(analyzed);
+    try code_gen.compile(ast);
 
     code_gen.deinit();
 }

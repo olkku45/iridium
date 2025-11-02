@@ -83,6 +83,7 @@ pub const Stmt = union(enum) {
     var_decl: VariableDecl,
     expr_stmt: ExprStmt,
     ret_stmt: RetStmt,
+    while_loop: WhileLoop,
     error_node: ErrorNode,
 
     pub const IfStmt = struct {
@@ -122,6 +123,11 @@ pub const Stmt = union(enum) {
 
     pub const RetStmt = struct {
         value: Expr,
+    };
+
+    pub const WhileLoop = struct {
+        cond: Expr,
+        body: []Stmt,
     };
 
     pub const ErrorNode = struct {};
@@ -167,7 +173,7 @@ pub const Expr = union(enum) {
         value: []const u8,
         span: Span,
         type: LiteralType,
-        //annotation: ?TypeAnnotation,
+        annotation: ?TypeAnnotation,
     };
 };
 
@@ -250,6 +256,9 @@ pub const Parser = struct {
             .RETURN => {
                 return try retStmt(self) orelse return null;
             },
+            .WHILE => {
+                return try whileLoop(self) orelse return null;
+            },
             else => {
                 //reportParseError(currToken(self));
                 //return ParseError.NotAStatement;
@@ -280,6 +289,23 @@ pub const Parser = struct {
 
         const slice = try stmt_list.toOwnedSlice(self.alloc);
         return slice;
+    }
+
+    fn whileLoop(self: *Parser) !?Stmt {
+       try advance(self, .WHILE, null) orelse return null;
+       try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
+
+       // TODO generalize the condition here
+       const cond = try parseLiteral(self) orelse return null;
+
+       try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+
+       const body = try parseBlock(self) orelse return null;
+
+       return Stmt{ .while_loop = .{
+           .cond = cond,
+           .body = body,
+       }};
     }
 
     fn fnDeclaration(self: *Parser) !?Stmt {
@@ -351,7 +377,7 @@ pub const Parser = struct {
         
         const ret_value = try parseLiteral(self) orelse return null;
         
-        try advance(self, .SEMICOLON, "expected ';' as line break") orelse return null;
+        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         return Stmt{ .ret_stmt = .{
             .value = ret_value,
@@ -402,13 +428,21 @@ pub const Parser = struct {
 
         try advance(self, .EQUAL, "expected '='") orelse return null;
 
+        // TODO generalize
         const value = try parseLiteral(self) orelse return null;
 
         try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         return Stmt{ .var_decl = .{
             .mutable = mutable,
-            .name = var_name,
+            .name = Expr{ .literal = .{
+                .value = var_name.literal.value,
+                .span = var_name.literal.span,
+                .type = var_name.literal.type,
+                .annotation = TypeAnnotation{ .named = .{
+                    .primitive = var_type,
+                }},
+            }},
             .value = Expr{ .literal = value.literal },
             .var_type = TypeAnnotation{ .named = .{
                 .primitive = var_type,
@@ -417,6 +451,7 @@ pub const Parser = struct {
         }};
     }
 
+    // TODO do we need to parse this a little differently
     fn externFnDeclaration(self: *Parser) !?Stmt {
         try advance(self, .EXTERN, null) orelse return null;
         try advance(self, .FN, "expected 'fn'") orelse return null;
@@ -588,6 +623,7 @@ pub const Parser = struct {
         return null;
     }
 
+    // TODO see if this works
     fn parseLiteral(self: *Parser) !?Expr {
         const curr = currToken(self);
         
@@ -605,9 +641,13 @@ pub const Parser = struct {
                 lit_type = .float;
                 try advance(self, .FLOAT, "expected a float") orelse return null; 
             },
-            .BOOL => {
+            .TRUE => {
                 lit_type = .boolean;
-                try advance(self, .BOOL, "expected a boolean") orelse return null;
+                try advance(self, .TRUE, "expected a boolean") orelse return null;
+            },
+            .FALSE => {
+                lit_type = .boolean;
+                try advance(self, .FALSE, "expected a boolean") orelse return null;  
             },
             .STRING => {
                 lit_type = .string;
@@ -627,6 +667,7 @@ pub const Parser = struct {
             .span = curr.span,
             .value = curr.lexeme,
             .type = lit_type,
+            .annotation = null,
         }};
 
         return lit;
@@ -651,7 +692,6 @@ pub const Parser = struct {
         self.current += 1;
     }
 
-    // TODO is this a misleading name?
     fn advanceSync(self: *Parser) !?void {
         if (isAtEnd(self)) {
             // TODO: see the todo in advance()
