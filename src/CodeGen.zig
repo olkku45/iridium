@@ -160,25 +160,25 @@ pub const CodeGen = struct {
             switch (stmt) {
                 .expr_stmt => |s| {
                     const call = s.expr.func_call.*;
-                    const arg = call.args;
+                    const arg_val = call.args[0].literal.value;
                     var putchar_char: u8 = undefined;
 
                     const func_ident = call.func_name.literal.value;
 
                     if (std.mem.eql(u8, func_ident, "println")) {
-                        for (0..arg.literal.value.len) |i| {
-                            if (i == 0 or i == arg.literal.value.len - 1) continue;
-                            createPutcharCall(self, arg.literal.value[i]);
+                        for (0..arg_val.len) |i| {
+                            if (i == 0 or i == arg_val.len - 1) continue;
+                            createPutcharCall(self, arg_val[i]);
                         }
                         createPutcharCall(self, '\n');
                     }
 
                     // TODO: remove hardcoding that char must be character, not number
-                    if (arg.literal.value.len == 3) {
-                        putchar_char = arg.literal.value[1];
+                    if (arg_val.len == 3) {
+                        putchar_char = arg_val[1];
                         createPutcharCall(self, putchar_char);
                     } else {
-                        if (std.mem.eql(u8, arg.literal.value[1..3], "\\n")) {
+                        if (std.mem.eql(u8, arg_val[1..3], "\\n")) {
                             createPutcharCall(self, '\n');
                         }
                     }
@@ -200,12 +200,12 @@ pub const CodeGen = struct {
                         switch (item) {
                             .expr_stmt => |expr_stmt| {
                                 const call = expr_stmt.expr.func_call.*;
-                                const arg = call.args;
+                                const arg_val = call.args[0].literal.value;
                     
                                 if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg.literal.value.len) |i| {
-                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
-                                        createPutcharCall(self, arg.literal.value[i]);
+                                    for (0..arg_val.len) |i| {
+                                        if (i == 0 or i == arg_val.len - 1) continue;
+                                        createPutcharCall(self, arg_val[i]);
                                     }
                                     createPutcharCall(self, '\n');
                                 }
@@ -235,12 +235,12 @@ pub const CodeGen = struct {
                         switch (item) {
                             .expr_stmt => |expr| {
                                 const call = expr.expr.func_call.*;
-                                const arg = call.args; // one arg
+                                const arg_val = call.args[0].literal.value; // one arg lol
 
                                 if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg.literal.value.len) |i| {
-                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
-                                        createPutcharCall(self, arg.literal.value[i]);
+                                    for (0..arg_val.len) |i| {
+                                        if (i == 0 or i == arg_val.len - 1) continue;
+                                        createPutcharCall(self, arg_val[i]);
                                     }
                                     createPutcharCall(self, '\n');
                                 }

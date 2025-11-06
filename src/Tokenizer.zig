@@ -21,6 +21,7 @@ pub const TokenType = enum {
     STAR,
     QUERY,
     COLON,
+    MODULUS,
     
     BANG,
     BANG_EQUAL,
@@ -63,6 +64,7 @@ pub const TokenType = enum {
     C_FLOAT,
     C_DOUBLE,
     C_CHAR,
+    NULL,
     
     USE,
     LET,
@@ -160,6 +162,7 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
     try keywords.put("c_float", .C_FLOAT);
     try keywords.put("c_double", .C_DOUBLE);
     try keywords.put("c_char", .C_CHAR);
+    try keywords.put("null", .NULL);
 
     return keywords;
 }
@@ -283,6 +286,7 @@ pub const Tokenizer = struct {
             '*' => if (match(self, '=')) try addToken(self, .STAR_EQUAL, alloc) else try addToken(self, .STAR, alloc),
             '?' => try addToken(self, .QUERY, alloc),
             ':' => try addToken(self, .COLON, alloc),
+            '%' => try addToken(self, .MODULUS, alloc),
 
             '!' => if (match(self, '=')) try addToken(self, .BANG_EQUAL, alloc) else try addToken(self, .BANG, alloc),
             '=' => {
