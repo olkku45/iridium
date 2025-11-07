@@ -4,7 +4,6 @@ const Parser = @import("Parser.zig");
 const Stmt = @import("Parser.zig").Stmt;
 const Expr = @import("Parser.zig").Expr;
 
-// TODO update
 pub const AstPrinter = struct {
     writer: *std.io.Writer,
     indent_level: u32,
