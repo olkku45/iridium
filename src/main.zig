@@ -19,6 +19,8 @@ pub const Span = struct {
     source_file: ?[]const u8,  
 };
 
+// TODO warning exceptions for main function and println
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -86,7 +88,7 @@ pub fn main() !void {
     try stdout.flush();
 
     var analyzer = try Analyzer.init(ast, allocator);
-    try analyzer.analyze();
+    _ = try analyzer.analyze();
 
     if (analyzer.diagnostics.items.len > 0) {
         for (analyzer.diagnostics.items) |diag| {
@@ -116,10 +118,10 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    //var code_gen = CodeGen.init(allocator);
-    //try code_gen.compile(ast);
+    var code_gen = CodeGen.init(allocator);
+    try code_gen.compile(ast);
 
-    //code_gen.deinit();
+    code_gen.deinit();
 }
 
 pub fn reportError(line: usize, where: []const u8, message: []const u8) void {

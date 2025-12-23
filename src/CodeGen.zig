@@ -159,6 +159,7 @@ pub const CodeGen = struct {
         for (decl.fn_decl.fn_body) |stmt| {
             switch (stmt) {
                 .expr_stmt => |s| {
+                    // TODO make this arm work
                     const call = s.expr.func_call.*;
                     const arg_val = call.args[0].literal.value;
                     var putchar_char: u8 = undefined;
@@ -201,7 +202,8 @@ pub const CodeGen = struct {
                             .expr_stmt => |expr_stmt| {
                                 const call = expr_stmt.expr.func_call.*;
                                 const arg_val = call.args[0].literal.value;
-                    
+
+                                // TODO make into separate function
                                 if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
                                     for (0..arg_val.len) |i| {
                                         if (i == 0 or i == arg_val.len - 1) continue;
@@ -263,26 +265,114 @@ pub const CodeGen = struct {
     fn generateExpr(self: *CodeGen, expr: Expr) anyerror!c.LLVMValueRef {
         return switch (expr) {
             .binary => try generateBinExpr(self, expr.binary.*),
-            .literal => try generateLiteral(self, expr.literal),
-            else => try generateLiteral(self, expr.literal), // temp
+            .literal => try generateLiteralExpr(self, expr.literal),
+            .unary => try generateUnaryExpr(self, expr.unary.*),
+            .grouping => try generateExprGrouping(self, expr.grouping.*),
+            .func_call => try generateFuncCallExpr(self, expr.func_call.*),
+            else => null,
         };
+    }
+
+    fn generateFuncCallExpr(self: *CodeGen, call: Expr.CallExpr) !c.LLVMValueRef {
+        const func = c.LLVMGetNamedFunction(self.module, call.func_name.literal.value.ptr);
+        const func_type = c.LLVMGlobalGetValueType(func);
+
+        var args: std.array_list.Aligned(c.LLVMValueRef, null) = .empty;
+        for (call.args) |arg| {
+            try args.append(self.allocator, try generateExpr(self, arg));
+        }
+
+        const args_slice = try args.toOwnedSlice(self.allocator);
+
+        return c.LLVMBuildCall2(
+            self.builder,
+            func_type,
+            func,
+            args_slice.ptr,
+            @intCast(args_slice.len),
+            call.func_name.literal.value.ptr,
+        );
+    }
+
+    fn generateUnaryExpr(self: *CodeGen, unary: Expr.UnaryExpr) !c.LLVMValueRef {
+        const operand = try generateExpr(self, unary.operand);
+
+        return switch (unary.op) {
+            .NEG => c.LLVMBuildNeg(self.builder, operand, "neg"),
+            .NOT => c.LLVMBuildNot(self.builder, operand, "not"),
+        };
+    }
+
+    fn generateExprGrouping(self: *CodeGen, grouping: Expr) !c.LLVMValueRef {
+        return generateExpr(self, grouping);
     }
 
     fn generateBinExpr(self: *CodeGen, bin: Expr.BinaryExpr) !c.LLVMValueRef {
         const left = try generateExpr(self, bin.left);
         const right = try generateExpr(self, bin.right);
 
-        switch (bin.op) {
-            .GREATER => {
-                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "cmp");
-            },
-            else => {},
-        }
-
-        return null;
+        // TODO load value from variable
+        return switch (bin.op) {
+            .GREATER => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSGT,
+                left,
+                right,
+                "cmp"
+            ),
+            .GREATER_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSGE,
+                left,
+                right,
+                "greater-or-equal"
+            ),
+            .LESS => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSLT,
+                left,
+                right,
+                "less"
+            ),
+            .LESS_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSLE,
+                left,
+                right,
+                "less-or-equal"
+            ),
+            .ADD => c.LLVMBuildAdd(self.builder, left, right, "add"),
+            .SUB => c.LLVMBuildSub(self.builder, left, right, "sub"),
+            .MUL => c.LLVMBuildMul(self.builder, left, right, "mul"),
+            .DIV => c.LLVMBuildSDiv(self.builder, left, right, "div"),
+            .MODULUS => c.LLVMBuildSRem(self.builder, left, right, "mod"),
+            .EQUAL_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntEQ,
+                left,
+                right,
+                "equal"
+            ),
+            .NOT_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntEQ,
+                left,
+                right,
+                "not-equal"
+            ),
+            .EQUAL => c.LLVMBuildStore(self.builder, right, left),
+            .ADD_EQUAL => c.LLVMBuildAdd(self.builder, left, right, "add-equal"),
+            .SUB_EQUAL => c.LLVMBuildSub(self.builder, left, right, "sub-equal"),
+            .MUL_EQUAL => c.LLVMBuildMul(self.builder, left, right, "mul-equal"),
+            .DIV_EQUAL => c.LLVMBuildSDiv(self.builder, left, right, "div-equal"),
+            .AND => c.LLVMBuildAnd(self.builder, left, right, "and"),
+            .OR => c.LLVMBuildOr(self.builder, left, right, "or"),
+            // false as dummy
+            .none => c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 0, 0),
+        };
     }
 
-    fn generateLiteral(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
+    fn generateLiteralExpr(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
         if (lit.type == .identifier) {
             if (std.mem.eql(u8, lit.value, "true")) {
                 return c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 1, 0);
@@ -292,9 +382,15 @@ pub const CodeGen = struct {
 
             const alloca = self.symbols.get(lit.value);
 
+            // arbitrary limit
             var buf: [200]u8 = undefined;
             _ = try std.fmt.bufPrintZ(&buf, "{s}", .{lit.value});
-            return c.LLVMBuildLoad2(self.builder, c.LLVMInt32TypeInContext(self.context), alloca.?, &buf);
+            return c.LLVMBuildLoad2(
+                self.builder,
+                c.LLVMInt32TypeInContext(self.context),
+                alloca.?,
+                &buf
+            );
         }
 
         const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
@@ -318,8 +414,7 @@ pub const CodeGen = struct {
         _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
 
         const alloca = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
-
-        const val = try generateLiteral(self, decl.value.literal);
+        const val = try generateExpr(self, decl.value);
 
         _ = c.LLVMBuildStore(self.builder, val, alloca);
         

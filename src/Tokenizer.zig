@@ -172,8 +172,6 @@ const Error = error{
     WrongCharacter,
 };
 
-// TODO: maybe change what character 'current' is, so that it's the
-// one we're actually looking at?
 pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
@@ -197,36 +195,11 @@ pub const Tokenizer = struct {
 
     pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
         while (!isAtEnd(self)) {
-            //try checkErrors(self);
             self.start = self.current;
             try getToken(self, allocator);
         }
 
         return self.tokens.toOwnedSlice(allocator);
-    }
-
-    // TODO: remove this and switch to work in parser
-    fn checkErrors(self: *Tokenizer) !void {
-        const char = currentChar(self);
-        //print("character at {d}:{d} : {d}\n", .{self.line, self.col, char});
-
-        switch (char) {
-            '\n' => {
-                if (try prevChar(self) != ' ' and
-                try prevChar(self) != ';' and
-                try prevChar(self) != '{' and
-                try prevChar(self) != '}' and
-                try prevChar(self) != '\n' and
-                try prevChar(self) != '\t') {
-                    print("{d}:{d} | ", .{self.line, self.col});
-                    return Error.WrongCharacter;   
-                }
-            },
-            ';' => {
-                if (try nextChar(self) != '\n') return Error.SemicolonNotAtEOL;
-            },
-            else => {},
-        }
     }
 
     fn addToken(self: *Tokenizer, token_type: TokenType, allocator: std.mem.Allocator) !void {
@@ -239,7 +212,7 @@ pub const Tokenizer = struct {
             .span = Span{
                 .start_col = self.col - text.len,
                 .end_col = self.col,
-                .line = self.line, // TODO: consider start line and end_line
+                .line = self.line,
                 .source_file = null,
             }
          });

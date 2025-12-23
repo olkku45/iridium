@@ -40,6 +40,7 @@ pub const BinaryOp = enum {
     AND,
     OR,
     none,
+    // TODO add MOD_EQUAL
 };
 
 pub const UnaryOp = enum {
@@ -93,7 +94,7 @@ pub const Stmt = union(enum) {
     pub const IfStmt = struct {
         condition: Expr,
         if_body: []Stmt,
-        //else_body: ?[]Stmt,
+        //else_body: []Stmt,
     };
 
     pub const ExternFnDecl = struct {
@@ -101,7 +102,7 @@ pub const Stmt = union(enum) {
         arg_type: TypeAnnotation,
         ret_type: TypeAnnotation,
 
-        symbol: ?*Symbol,
+        //symbol: ?*Symbol,
     };
 
     pub const FnDecl = struct {
@@ -110,7 +111,7 @@ pub const Stmt = union(enum) {
         //params: , COMING SOON!!!
         ret_type: TypeAnnotation,
 
-        symbol: ?*Symbol,
+        //symbol: ?*Symbol,
     };
 
     pub const VariableDecl = struct {
@@ -118,7 +119,7 @@ pub const Stmt = union(enum) {
         value: Expr,
         mutable: bool,
         var_type: TypeAnnotation,
-        symbol: ?*Symbol,
+        //symbol: ?*Symbol,
     };
 
     pub const ExprStmt = struct {
@@ -160,15 +161,15 @@ pub const Expr = union(enum) {
         func_name: Expr,
         args: []Expr,
 
-        func_symbol: ?*Symbol,
-        ret_type: ?TypeAnnotation,
+        //func_symbol: ?*Symbol,
+        //ret_type: ?TypeAnnotation,
     };
 
     pub const Literal = struct {
         value: []const u8,
         span: Span,
-        type: ?LiteralType,
-        annotation: ?TypeAnnotation,
+        type: LiteralType,
+        //annotation: ?TypeAnnotation,
     };
 
     pub const ErrorNode = struct {};
@@ -199,7 +200,6 @@ fn initStatements() std.array_list.Aligned(Stmt, null) {
     const stmts: std.array_list.Aligned(Stmt, null) = .empty;
     return stmts;
 }
-
 
 pub const PrecedenceTable = struct {
     const Precedence = enum(u8) {
@@ -307,7 +307,6 @@ pub const Parser = struct {
             else => {
                 //reportParseError(currToken(self));
                 //return ParseError.NotAStatement;
-
             },
         }
         return null;
@@ -414,14 +413,12 @@ pub const Parser = struct {
                     .span = curr.span,
                     .value = curr.lexeme,
                     .type = lit_type,
-                    .annotation = null,
                 }};
                 return expr;
             },
         
             .IDENTIFIER => {
                 const expr = Expr{ .literal = .{
-                    .annotation = null,
                     .span = curr.span,
                     .type = .identifier,
                     .value = curr.lexeme,
@@ -525,12 +522,20 @@ pub const Parser = struct {
                         try advance(self, .OR, "expected 'or'") orelse return null;
                         bin_op = .OR;
                     },
+                    .EQUAL_EQUAL => {
+                        try advance(self, .EQUAL_EQUAL, "expected '=='") orelse return null;
+                        bin_op = .EQUAL_EQUAL;
+                    },
+                    .BANG_EQUAL => {
+                        try advance(self, .BANG_EQUAL, "expected '!='") orelse return null;
+                        bin_op = .NOT_EQUAL;
+                    },
                     else => {},
                 }
                 
                 const right = try self.parseExpressionWithPrecedence(next_prec) orelse return null;
 
-                print("{any}\n", .{currToken(self).token_type});
+                print("{any}\n", .{currToken(self).token_type}); // DEBUG
 
                 // not part of expression, but rather the statement... TODO
                 //try advance(self, .SEMICOLON, "#4234 expected ';'") orelse return null;
@@ -568,8 +573,7 @@ pub const Parser = struct {
 
                 if (currToken(self).token_type != .RIGHT_PAREN) {
                     while (true) {
-                        try args.append(self.alloc, try self.parseExpression() orelse return null); 
-                        
+                        try args.append(self.alloc, try self.parseExpression() orelse return null);                        
                         if (!(try match(self, .COMMA) orelse return null)) break;
                     }
                 }
@@ -581,8 +585,6 @@ pub const Parser = struct {
                 expr.* = .{
                      .func_name = left,
                      .args = try args.toOwnedSlice(self.alloc),
-                     .func_symbol = null,
-                     .ret_type = null,
                 };
                 return Expr{ .func_call = expr };
             },
@@ -612,8 +614,7 @@ pub const Parser = struct {
         try advance(self, .FN, null) orelse return null;
 
         const func_name = Expr{ .literal = .{
-            .type = null,
-            .annotation = null,
+            .type = .string,
             .span = currToken(self).span,
             .value = currToken(self).lexeme,
         }};
@@ -641,7 +642,6 @@ pub const Parser = struct {
                     .primitive = ret_type,
                 },
             },
-            .symbol = null,
         }};
     }
 
@@ -743,19 +743,11 @@ pub const Parser = struct {
 
         return Stmt{ .var_decl = .{
             .mutable = mutable,
-            .name = Expr{ .literal = .{
-                .value = var_name.literal.value,
-                .span = var_name.literal.span,
-                .type = var_name.literal.type,
-                .annotation = TypeAnnotation{ .named = .{
-                    .primitive = var_type,
-                }},
-            }},
+            .name = Expr{ .literal = var_name.literal },
             .value = value,
             .var_type = TypeAnnotation{ .named = .{
                 .primitive = var_type,
             }},
-            .symbol = null,
         }};
     }
 
@@ -786,7 +778,6 @@ pub const Parser = struct {
             .ret_type = TypeAnnotation{ .named = .{
                 .primitive = ret_type,
             }},
-            .symbol = null,
         }};
     }
 
@@ -974,7 +965,6 @@ pub const Parser = struct {
             .span = curr.span,
             .value = curr.lexeme,
             .type = lit_type,
-            .annotation = null,
         }};
 
         return lit;
@@ -1008,7 +998,6 @@ pub const Parser = struct {
         self.current += 1;
     }
 
-    // TODO does this work
     fn match(self: *Parser, token_type: TokenType) !?bool {
         if (currToken(self).token_type == token_type) {
             try advance(self, token_type, null) orelse return null;

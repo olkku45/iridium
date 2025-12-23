@@ -32,18 +32,18 @@ pub const Symbol = union(enum) {
         name: []const u8,
         value: Expr,
         type: TypeAnnotation,
-        llvm_value: ?c.LLVMValueRef,
-        llvm_type: ?c.LLVMTypeRef,
+        //llvm_value: ?c.LLVMValueRef,
+        //llvm_type: ?c.LLVMTypeRef,
     };
 
     pub const FunctionSymbol = struct {
         span: Span,
         ref_count: *u32,
         name: []const u8,
-        param_types: ?[]TypeAnnotation, // currently optional because no params
+        //param_types: []TypeAnnotation,
         ret_type: TypeAnnotation,
-        llvm_param_types: ?[]c.LLVMTypeRef,
-        llvm_ret_type: ?c.LLVMTypeRef,        
+        //llvm_param_types: ?[]c.LLVMTypeRef,
+        //llvm_ret_type: ?c.LLVMTypeRef,        
     };
 
     pub const ExternFnSymbol = struct {
@@ -52,8 +52,8 @@ pub const Symbol = union(enum) {
         name: []const u8,
         param_type: TypeAnnotation,
         ret_type: TypeAnnotation,
-        llvm_param_types: ?[]c.LLVMTypeRef,
-        llvm_ret_type: ?c.LLVMTypeRef,
+        //llvm_param_types: ?[]c.LLVMTypeRef,
+        //llvm_ret_type: ?c.LLVMTypeRef,
     };
 };
 
@@ -126,6 +126,28 @@ pub const SymbolTable = struct {
     }
 };
 
+pub const AnalyzedNode = union(enum) {
+    stmt: AnalyzedStmt,
+    call: AnalyzedFuncCall,
+    literal: AnalyzedLiteral,  
+
+    pub const AnalyzedStmt = struct {
+        parsed: Stmt,
+        symbol: Symbol,  
+    };
+
+    pub const AnalyzedFuncCall = struct {
+        parsed: Stmt,
+        symbol: Symbol,
+        ret_type: TypeAnnotation,  
+    };
+
+    pub const AnalyzedLiteral = struct {
+        parsed: Stmt,
+        lit_type: TypeAnnotation,  
+    };
+};
+
 pub const Analyzer = struct {
     ast: []Stmt,
     symbol_table: SymbolTable,
@@ -141,11 +163,13 @@ pub const Analyzer = struct {
         };
     }
 
-    pub fn analyze(self: *Analyzer) !void {
+    pub fn analyze(self: *Analyzer) !?[]AnalyzedNode {
         try self.symbol_table.enterScope(); // 'program scope'
-        
+
+        var nodes: std.array_list.Aligned(AnalyzedNode, null) = .empty;
         for (self.ast) |top_stmt| {
-            try self.traverseTopStmt(top_stmt);
+            try nodes.append(self.alloc,
+            try self.traverseTopStmt(top_stmt) orelse return null);
         }
 
         var it = self.symbol_table.current_scope.*.symbols.iterator();
@@ -154,6 +178,7 @@ pub const Analyzer = struct {
             switch (entry.value_ptr.*) {
                 .function => |f| {
                     if (f.ref_count.* == 0) {
+                        if (std.mem.eql(u8, f.name, "main")) break;
                         try collectWarning(
                             self,
                             "#09412 unused function",
@@ -164,6 +189,8 @@ pub const Analyzer = struct {
                 },
                 .extern_fn => |ef| {
                     if (ef.ref_count.* == 0) {
+                        // hardcoding like this for now...
+                        if (std.mem.eql(u8, ef.name, "putchar")) break;
                         try collectWarning(
                             self,
                             "#45902 unused external function",
@@ -177,21 +204,25 @@ pub const Analyzer = struct {
         }
 
         self.symbol_table.exitScope();
+
+        return try nodes.toOwnedSlice(self.alloc);
     }
 
-    fn traverseTopStmt(self: *Analyzer, stmt: Stmt) !void {
-        switch (stmt) {
+    fn traverseTopStmt(self: *Analyzer, stmt: Stmt) !?AnalyzedNode {
+        return switch (stmt) {
             .fn_decl => |s| {
-                try checkFunction(self, s);
+                return try checkFunction(self, s);
             },
             .extern_fn_decl => |s| {
-                try checkExternDecl(self, s);
+                return try checkExternDecl(self, s);
             },
-            else => {},
-        }
+            else => {
+                return null;
+            },
+        };
     }
 
-    fn checkExternDecl(self: *Analyzer, stmt: Stmt.ExternFnDecl) !void {
+    fn checkExternDecl(self: *Analyzer, stmt: Stmt.ExternFnDecl) !AnalyzedNode {
         if (self.symbol_table.lookupItem(stmt.name.literal.value) != null) {
             try collectError(
                 self,
@@ -205,8 +236,6 @@ pub const Analyzer = struct {
         ptr.* = 0;
 
         const extern_decl_symbol = Symbol{ .extern_fn = .{
-            .llvm_param_types = null,
-            .llvm_ret_type = null,
             .name = stmt.name.literal.value,
             .ref_count = ptr,
             .span = stmt.name.literal.span,
@@ -219,10 +248,13 @@ pub const Analyzer = struct {
             extern_decl_symbol
         );
 
-        stmt.symbol.?.* = extern_decl_symbol;
+        return AnalyzedNode{ .stmt = .{
+            .parsed = Stmt{ .extern_fn_decl = stmt },
+            .symbol = extern_decl_symbol,
+        }};
     }
 
-    fn checkFunction(self: *Analyzer, func: Stmt.FnDecl) !void {
+    fn checkFunction(self: *Analyzer, func: Stmt.FnDecl) !AnalyzedNode {
         if (self.symbol_table.lookupItem(func.name.literal.value) != null) {
             try collectError(
                 self,
@@ -238,18 +270,18 @@ pub const Analyzer = struct {
         ptr.* = 0;
 
         const fn_symbol = Symbol{ .function = .{
-            .llvm_param_types = null,
-            .llvm_ret_type = null,
             .name = func.name.literal.value,
             .span = func.name.literal.span,
             .ref_count = ptr,
             .ret_type = func.ret_type,
-            .param_types = null, 
         }};
         
         try self.symbol_table.addItemToScope(func.name.literal.value, fn_symbol);
 
-        func.symbol.?.* = fn_symbol;
+        return AnalyzedNode{ .stmt = .{
+            .parsed = Stmt{ .fn_decl = func },
+            .symbol = fn_symbol,
+        }};
     }
 
     fn checkRetStmt(self: *Analyzer, ret_stmt: Stmt.RetStmt) !void {
@@ -358,6 +390,8 @@ pub const Analyzer = struct {
         if (lit_expr.type == .identifier) {
             const lookup = self.symbol_table.lookupItem(lit_expr.value);
             if (lookup == null) {
+                // hardcoding for now...
+                if (std.mem.eql(u8, lit_expr.value, "println")) return;
                 try collectError(
                     self,
                     "#5913 symbol not found",
@@ -391,8 +425,6 @@ pub const Analyzer = struct {
         ptr.* = 0;
 
         const decl_symbol = Symbol{ .variable = .{
-            .llvm_type = null,
-            .llvm_value = null,
             .ref_count = ptr,
             .name = decl.name.literal.value,
             .span = decl.name.literal.span,
@@ -403,7 +435,10 @@ pub const Analyzer = struct {
 
         try self.symbol_table.addItemToScope(decl.name.literal.value, decl_symbol);
 
-        decl.symbol.?.* = decl_symbol;
+        //return AnalyzedNode{ .stmt = .{
+        //    .parsed = Stmt{ .var_decl = decl },
+        //    .symbol = decl_symbol,
+        //}};
     }
 
     fn collectError(self: *Analyzer, msg: ?[]const u8, val: []const u8, span: Span) !void {
