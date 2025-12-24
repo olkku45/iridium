@@ -144,7 +144,7 @@ pub const CodeGen = struct {
         _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
-    fn putcharsFromPrintln(self: *CodeGen, expr: Expr.CallExpr) void {
+    fn generatePutchar(self: *CodeGen, expr: Expr.CallExpr) void {
         const arg_val = expr.args[0].literal.value;
         var putchar_char: u8 = undefined;
 
@@ -181,90 +181,82 @@ pub const CodeGen = struct {
         const block = c.LLVMAppendBasicBlock(func, "block");
         c.LLVMPositionBuilderAtEnd(self.builder, block);
 
-        for (decl.fn_decl.fn_body) |stmt| {
-            // TODO
-            switch (stmt) {
-                .expr_stmt => |s| {
-                    _ = try generateExpr(self, s.expr);
-                },
-                .var_decl => |var_decl| {
-                    try createVariableDecl(self, var_decl);  
-                },
-                .if_stmt => |if_stmt| {
-                    const then_block = c.LLVMAppendBasicBlock(func, "if-then");
-                    const else_block = c.LLVMAppendBasicBlock(func, "if-else");
-                    const merge_block = c.LLVMAppendBasicBlock(func, "if-merge");
-        
-                    const evaluated = try generateExpr(self, if_stmt.condition);
-
-                    _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, then_block);
-                    
-                    for (if_stmt.if_body) |item| {
-                        switch (item) {
-                            .expr_stmt => |expr_stmt| {
-                                const call = expr_stmt.expr.func_call.*;
-                                const arg_val = call.args[0].literal.value;
-
-                                // TODO make into separate function
-                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg_val.len) |i| {
-                                        if (i == 0 or i == arg_val.len - 1) continue;
-                                        createPutcharCall(self, arg_val[i]);
-                                    }
-                                    createPutcharCall(self, '\n');
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                    _ = c.LLVMBuildBr(self.builder, merge_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, else_block);
-                    
-                    _ = c.LLVMBuildBr(self.builder, merge_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
-                },
-                .while_loop => |while_loop| {
-                    const cond_block = c.LLVMAppendBasicBlock(func, "while-cond");
-                    const body_block = c.LLVMAppendBasicBlock(func, "while-body");
-                    const end_block = c.LLVMAppendBasicBlock(func, "while-end");
-
-                    _ = c.LLVMBuildBr(self.builder, cond_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, cond_block);
-                    const eval_cond = try generateExpr(self, while_loop.cond);
-                    _ = c.LLVMBuildCondBr(self.builder, eval_cond, body_block, end_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, body_block);
-                    for (while_loop.body) |item| {
-                        switch (item) {
-                            .expr_stmt => |expr| {
-                                const call = expr.expr.func_call.*;
-                                const arg_val = call.args[0].literal.value; // one arg lol
-
-                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg_val.len) |i| {
-                                        if (i == 0 or i == arg_val.len - 1) continue;
-                                        createPutcharCall(self, arg_val[i]);
-                                    }
-                                    createPutcharCall(self, '\n');
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                    _ = c.LLVMBuildBr(self.builder, cond_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, end_block);
-                },
-                else => {},
-            }
-        }
+        try generateBlock(self, decl.fn_decl.fn_body, func);
 
         const ret_val = c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), 0, 0);
         _ = c.LLVMBuildRet(self.builder, ret_val);
     }
 
+    fn generateBlock(
+        self: *CodeGen,
+        stmts: []Stmt,
+        func: ?*c.struct_LLVMOpaqueValue,
+    ) anyerror!void {
+        for (stmts) |stmt| {
+            switch (stmt) {
+                .expr_stmt => |s| {
+                    _ = try generateExpr(self, s.expr);
+                },
+                .var_decl => |d| {
+                    try createVariableDecl(self, d);
+                },
+                .if_stmt => |i| {
+                    try generateIfStmt(self, i, func);
+                },
+                .while_loop => |w| {
+                    try generateWhileLoop(self, w, func);
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn generateIfStmt(
+        self: *CodeGen,
+        stmt: Stmt.IfStmt,
+        func: ?*c.struct_LLVMOpaqueValue
+    ) !void {    
+        const then_block = c.LLVMAppendBasicBlock(func, "if-then");
+        const else_block = c.LLVMAppendBasicBlock(func, "if-else");
+        const merge_block = c.LLVMAppendBasicBlock(func, "if-merge");
+
+        const evaluated = try generateExpr(self, stmt.condition);
+
+        _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, then_block);
+
+        try generateBlock(self, stmt.if_body, func);
+        
+        _ = c.LLVMBuildBr(self.builder, merge_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, else_block);
+
+        _ = c.LLVMBuildBr(self.builder, merge_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
+    }
+
+    fn generateWhileLoop(
+        self: *CodeGen,
+        stmt: Stmt.WhileLoop,
+        func: ?*c.struct_LLVMOpaqueValue
+    ) !void {
+        const cond_block = c.LLVMAppendBasicBlock(func, "while-cond");
+        const body_block = c.LLVMAppendBasicBlock(func, "while-body");
+        const end_block = c.LLVMAppendBasicBlock(func, "while-end");
+
+        _ = c.LLVMBuildBr(self.builder, cond_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, cond_block);
+        
+        const eval_cond = try generateExpr(self, stmt.cond);
+        
+        _ = c.LLVMBuildCondBr(self.builder, eval_cond, body_block, end_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, body_block);
+
+        try generateBlock(self, stmt.body, func);
+        
+        _ = c.LLVMBuildBr(self.builder, cond_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, end_block);
+    }
+    
     fn generateExpr(self: *CodeGen, expr: Expr) anyerror!c.LLVMValueRef {
         return switch (expr) {
             .binary => try generateBinExpr(self, expr.binary.*),
@@ -279,7 +271,7 @@ pub const CodeGen = struct {
     fn generateFuncCallExpr(self: *CodeGen, call: Expr.CallExpr) !c.LLVMValueRef {
         // hardcoded putchar is here now
         if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-            putcharsFromPrintln(self, call);
+            generatePutchar(self, call);
             return null;
         }
 
