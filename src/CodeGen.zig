@@ -144,6 +144,31 @@ pub const CodeGen = struct {
         _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
+    fn putcharsFromPrintln(self: *CodeGen, expr: Expr.CallExpr) void {
+        const arg_val = expr.args[0].literal.value;
+        var putchar_char: u8 = undefined;
+
+        const func_ident = expr.func_name.literal.value;
+
+        if (std.mem.eql(u8, func_ident, "println")) {
+            for (0..arg_val.len) |i| {
+                if (i == 0 or i == arg_val.len - 1) continue;
+                createPutcharCall(self, arg_val[i]);
+            }
+            createPutcharCall(self, '\n');
+        }
+
+        // TODO: remove hardcoding that char must be character, not number
+        if (arg_val.len == 3) {
+            putchar_char = arg_val[1];
+            createPutcharCall(self, putchar_char);
+        } else {
+            if (std.mem.eql(u8, arg_val[1..3], "\\n")) {
+                createPutcharCall(self, '\n');
+            }
+        }
+    }
+
     // create main function
     fn createFunction(self: *CodeGen, name: []const u8, decl: Stmt) !void {
         // string to memory, arbitrary 200 char limit
@@ -157,32 +182,10 @@ pub const CodeGen = struct {
         c.LLVMPositionBuilderAtEnd(self.builder, block);
 
         for (decl.fn_decl.fn_body) |stmt| {
+            // TODO
             switch (stmt) {
                 .expr_stmt => |s| {
-                    // TODO make this arm work
-                    const call = s.expr.func_call.*;
-                    const arg_val = call.args[0].literal.value;
-                    var putchar_char: u8 = undefined;
-
-                    const func_ident = call.func_name.literal.value;
-
-                    if (std.mem.eql(u8, func_ident, "println")) {
-                        for (0..arg_val.len) |i| {
-                            if (i == 0 or i == arg_val.len - 1) continue;
-                            createPutcharCall(self, arg_val[i]);
-                        }
-                        createPutcharCall(self, '\n');
-                    }
-
-                    // TODO: remove hardcoding that char must be character, not number
-                    if (arg_val.len == 3) {
-                        putchar_char = arg_val[1];
-                        createPutcharCall(self, putchar_char);
-                    } else {
-                        if (std.mem.eql(u8, arg_val[1..3], "\\n")) {
-                            createPutcharCall(self, '\n');
-                        }
-                    }
+                    _ = try generateExpr(self, s.expr);
                 },
                 .var_decl => |var_decl| {
                     try createVariableDecl(self, var_decl);  
@@ -274,6 +277,12 @@ pub const CodeGen = struct {
     }
 
     fn generateFuncCallExpr(self: *CodeGen, call: Expr.CallExpr) !c.LLVMValueRef {
+        // hardcoded putchar is here now
+        if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
+            putcharsFromPrintln(self, call);
+            return null;
+        }
+
         const func = c.LLVMGetNamedFunction(self.module, call.func_name.literal.value.ptr);
         const func_type = c.LLVMGlobalGetValueType(func);
 
