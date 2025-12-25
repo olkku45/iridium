@@ -1,11 +1,16 @@
 extern fn putchar(c: c_int) => c_int;
 
 fn main() => c_int {
+	// THIS SHOULD BE MUT
 	let x: c_int = 8 - 3 / 3;
 
 	if (x > 3) {
 		println("x is greater than 3.");
+		x += 1;
+		println("x is 8");
 	}
 
 	x = 2 + (3 + 2 - (561 - 471)) * 2;
+
+	x = !(3 == 10);
 }

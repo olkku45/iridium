@@ -202,32 +202,35 @@ fn initStatements() std.array_list.Aligned(Stmt, null) {
 }
 
 pub const PrecedenceTable = struct {
-    const Precedence = enum(u8) {
-        none = 0,
-        assignment = 10,
-        logical_or = 20,
-        logical_and = 30,
-        equality = 40,
-        relational = 50,
-        add_sub = 60,
-        mul_div_mod = 70,
-        unary = 80,
-        call_access = 90,
-        primary = 100,
+    const Precedence = struct {
+        const none = 0;
+        const assignment = 10;
+        const logical_or = 20;
+        const logical_and = 30;
+        const equality = 40;
+        const relational = 50;
+        const add_sub = 60;
+        const mul_div_mod = 70;
+        const unary = 80;
+        const call_access = 90;
+        const primary = 100;
     };
 
-    fn getInfixPrecedence(token_type: TokenType) Precedence {
+    fn getInfixPrecedence(token_type: TokenType) u8 {
         return switch (token_type) {
             .EQUAL, .PLUS_EQUAL, .MINUS_EQUAL, .STAR_EQUAL, .SLASH_EQUAL
-             => .assignment,
-            .OR => .logical_or,
-            .AND => .logical_and,
-            .EQUAL_EQUAL, .BANG_EQUAL => .equality,
-            .GREATER, .GREATER_EQUAL, .LESS, .LESS_EQUAL => .relational,
-            .PLUS, .MINUS => .add_sub,
-            .STAR, .SLASH, .MODULUS => .mul_div_mod,
-            .LEFT_PAREN, .LEFT_BRACKET => .call_access,
-            else => .none,  
+             => Precedence.assignment,
+            .OR => Precedence.logical_or,
+            .AND => Precedence.logical_and,
+            .EQUAL_EQUAL, .BANG_EQUAL => Precedence.equality,
+            .GREATER, .GREATER_EQUAL, .LESS, .LESS_EQUAL => Precedence.relational,
+            .PLUS, .MINUS => Precedence.add_sub,
+            .STAR, .SLASH, .MODULUS => Precedence.mul_div_mod,
+            .LEFT_PAREN, .LEFT_BRACKET => Precedence.call_access,
+            else => {
+                std.debug.print("{any}\n", .{token_type});
+                return Precedence.none;
+            },  
         };
     }
 
@@ -276,8 +279,6 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) anyerror!?Stmt {
         const curr_token_type = getCurrentTokenType(self);
-        //print("token type: {any}\n", .{curr_token_type}); // DEBUG
-        //print("token line: {d}\n", .{currToken(self).span.line}); // DEBUG
 
         switch (curr_token_type) {
             .EXTERN => {
@@ -290,13 +291,11 @@ pub const Parser = struct {
                 return try variableDecl(self) orelse return null;  
             },
             .IF => {
+                std.debug.print("gggg\n", .{});
                 return try ifStmt(self) orelse return null;
             },
             .IDENTIFIER => {
-                const expr = try parseExpression(self) orelse return null;
-                return Stmt{ .expr_stmt = .{
-                    .expr = expr,
-                }};
+                return try parseExprStmt(self) orelse return null;
             },
             .RETURN => {
                 return try retStmt(self) orelse return null;
@@ -336,15 +335,21 @@ pub const Parser = struct {
         return slice;
     }
 
+    fn parseExprStmt(self: *Parser) !?Stmt {
+        const expr = try parseExpression(self) orelse return null;
+        try advance(self, .SEMICOLON, "#59183 expected ';'") orelse return null;
+        return Stmt{ .expr_stmt = .{ .expr = expr } };
+    }
+
     // === PRATT PARSER ===
     
     fn parseExpression(self: *Parser) !?Expr {
-        return try parseExpressionWithPrecedence(self, .none) orelse return null;
+        return try parseExpressionWithPrecedence(self, PrecedenceTable.Precedence.none) orelse return null;
     }
 
     fn parseExpressionWithPrecedence(
         self: *Parser,
-        min_prec: PrecedenceTable.Precedence
+        min_prec: u8
     ) !?Expr {
         var left = try parsePrefix(self) orelse return null;
 
@@ -352,18 +357,11 @@ pub const Parser = struct {
             const op_type = getCurrentTokenType(self);
             const precedence = PrecedenceTable.getInfixPrecedence(op_type);
 
-            //print("moi1\n", .{});
-
-            if (@intFromEnum(precedence) <= @intFromEnum(min_prec)) {
+            if (precedence <= min_prec) {
                 break;
             }
 
-            //print("moi2\n", .{});
-
             left = try parseInfix(self, left, precedence) orelse return null;
-            // DEBUG
-            //print("moi3\n", .{});
-            //print("{s} : {any}\n", .{currToken(self).lexeme, currToken(self).span.line});
         }
 
         return left;
@@ -416,7 +414,6 @@ pub const Parser = struct {
                 }};
                 return expr;
             },
-        
             .IDENTIFIER => {
                 const expr = Expr{ .literal = .{
                     .span = curr.span,
@@ -444,7 +441,7 @@ pub const Parser = struct {
                 } else {
                     try advance(self, .BANG, "expected '!'") orelse return null;
                 }
-                const operand = try self.parseExpressionWithPrecedence(.unary) orelse return null;
+                const operand = try self.parseExpressionWithPrecedence(PrecedenceTable.Precedence.unary) orelse return null;
                                
                 const expr = try self.alloc.create(Expr.UnaryExpr);
                 expr.* = .{
@@ -463,7 +460,11 @@ pub const Parser = struct {
         }
     }
 
-    fn parseInfix(self: *Parser, left: Expr, prec: PrecedenceTable.Precedence) anyerror!?Expr {
+    fn parseInfix(
+        self: *Parser,
+        left: Expr,
+        prec: u8
+    ) anyerror!?Expr {
         const op = currToken(self);
 
         return switch (op.token_type) {
@@ -472,9 +473,9 @@ pub const Parser = struct {
             .EQUAL_EQUAL, .BANG_EQUAL,
             .GREATER, .GREATER_EQUAL, .LESS, .LESS_EQUAL,
             .AND, .OR => {
-                const next_prec: PrecedenceTable.Precedence =
+                const next_prec: u8 =
                     if (PrecedenceTable.isRightAssociative(op.token_type)) prec
-                    else @enumFromInt(@intFromEnum(prec) + 10);
+                    else prec + 1;
 
                 var bin_op: BinaryOp = undefined;
                 switch (op.token_type) {
@@ -535,7 +536,7 @@ pub const Parser = struct {
                 
                 const right = try self.parseExpressionWithPrecedence(next_prec) orelse return null;
 
-                print("{any}\n", .{currToken(self).token_type}); // DEBUG
+                //print("{any}\n", .{currToken(self).token_type}); // DEBUG
 
                 // not part of expression, but rather the statement... TODO
                 //try advance(self, .SEMICOLON, "#4234 expected ';'") orelse return null;
@@ -561,7 +562,7 @@ pub const Parser = struct {
                     .right = right,
                 };
 
-                try advance(self, .SEMICOLON, "#94521 expected ';'") orelse return null;
+                //try advance(self, .SEMICOLON, "#94521 expected ';'") orelse return null;
                 
                 return Expr{ .binary = expr };
             },
@@ -579,7 +580,7 @@ pub const Parser = struct {
                 }
 
                 try advance(self, .RIGHT_PAREN, "expected ')' after arguments") orelse return null;
-                try advance(self, .SEMICOLON, "#9041 expected ';'") orelse return null;
+                //try advance(self, .SEMICOLON, "#9041 expected ';'") orelse return null;
 
                 const expr = try self.alloc.create(Expr.CallExpr);
                 expr.* = .{
@@ -588,9 +589,76 @@ pub const Parser = struct {
                 };
                 return Expr{ .func_call = expr };
             },
+            
             // TODO array indexing & member access?
 
-            else => error.SomethingWentWrong,
+            .PLUS_EQUAL => {
+                try advance(self, .PLUS_EQUAL, "excepted '+='") orelse return null;
+                const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
+                const bin_op: BinaryOp = .ADD_EQUAL;
+
+                const expr = try self.alloc.create(Expr.BinaryExpr);
+                expr.* = .{
+                    .left = left,
+                    .op = bin_op,
+                    .right = right,
+                };
+
+                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+                return Expr{ .binary = expr };
+            },
+            .MINUS_EQUAL => {
+                try advance(self, .MINUS_EQUAL, "expected -=") orelse return null;
+                const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
+                const bin_op: BinaryOp = .SUB_EQUAL;
+
+                const expr = try self.alloc.create(Expr.BinaryExpr);
+                expr.* = .{
+                    .left = left,
+                    .op = bin_op,
+                    .right = right,
+                };
+
+                // TODO do this advance when parsing the statement
+                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+                return Expr{ .binary = expr };
+            },
+            .STAR_EQUAL => {
+                try advance(self, .STAR_EQUAL, "expected '*='") orelse return null;
+                const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
+                const bin_op: BinaryOp = .MUL_EQUAL;
+
+                const expr = try self.alloc.create(Expr.BinaryExpr);
+                expr.* = .{
+                    .left = left,
+                    .op = bin_op,
+                    .right = right,
+                };
+
+                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+                return Expr{ .binary = expr };
+            },
+            .SLASH_EQUAL => {
+                try advance(self, .SLASH_EQUAL, "expected '/='") orelse return null;
+                const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
+                const bin_op: BinaryOp = .DIV_EQUAL;
+
+                const expr = try self.alloc.create(Expr.BinaryExpr);
+                expr.* = .{
+                    .left = left,
+                    .op = bin_op,
+                    .right = right,
+                };
+
+                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+                return Expr{ .binary = expr };
+            },
+            else => {
+                //std.debug.print("{any}\n", .{op.token_type});
+                //return error.SomethingWentWrong;
+                const err = Expr.ErrorNode{};
+                return Expr{ .error_node = err };
+            },
         };
     }
 
@@ -622,7 +690,7 @@ pub const Parser = struct {
 
         try advance(self, .LEFT_PAREN, "expected '(' after function name") orelse return null;
 
-        // no params for now
+        // no params yet
 
         try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
         try advance(self, .RIGHT_ARROW, "expected '=>'") orelse return null;
@@ -656,7 +724,7 @@ pub const Parser = struct {
         //print("gfsdsdnlsedfsdils\n", .{});
 
         try advance(self, .RIGHT_PAREN, "expected ')' after condition") orelse return null;
-        
+
         const if_body = try parseBlock(self) orelse return null;
 
         return Stmt{ .if_stmt = .{
@@ -737,7 +805,12 @@ pub const Parser = struct {
 
         try advance(self, .EQUAL, "expected '='") orelse return null;
 
+        //std.debug.print("gggg\n", .{});
+        //std.debug.print("{any}", .{self.tokens[self.current]});
+
         const value = try parseExpression(self) orelse return null;
+
+        std.debug.print("gggg\n", .{});
 
         try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
+const TypeAnnotation = @import("Parser.zig").TypeAnnotation;
 const Type = @import("Parser.zig").Type;
 const Result = @import("Analyzer.zig").Analyzer.Result;
 const Stmt = @import("Parser.zig").Stmt;
@@ -103,7 +104,6 @@ pub const CodeGen = struct {
             }
 
         c.LLVMDisposeTargetMachine(target_machine);
-
         c.LLVMDumpModule(self.module);
     }
 
@@ -356,12 +356,15 @@ pub const CodeGen = struct {
             ),
             .NOT_EQUAL => c.LLVMBuildICmp(
                 self.builder,
-                c.LLVMIntEQ,
+                c.LLVMIntNE,
                 left,
                 right,
                 "not-equal"
             ),
-            .EQUAL => c.LLVMBuildStore(self.builder, right, left),
+            .EQUAL => {
+                const ptr = self.symbols.get(bin.left.literal.value);
+                return c.LLVMBuildStore(self.builder, right, ptr.?);
+            },
             .ADD_EQUAL => c.LLVMBuildAdd(self.builder, left, right, "add-equal"),
             .SUB_EQUAL => c.LLVMBuildSub(self.builder, left, right, "sub-equal"),
             .MUL_EQUAL => c.LLVMBuildMul(self.builder, left, right, "mul-equal"),
@@ -402,23 +405,28 @@ pub const CodeGen = struct {
         const name = decl.name.literal.value;
         const var_type = decl.var_type.named.primitive;
 
+        const val = try generateExpr(self, decl.value);
+
+        const alloca = try createAlloca(self, var_type, name);
+        _ = c.LLVMBuildStore(self.builder, val, alloca);
+        
+        try self.symbols.put(name, alloca);
+    }
+
+    fn createAlloca(
+        self: *CodeGen,
+        val_type: TypeAnnotation.NamedType.PrimitiveType,
+        val: []const u8,
+    ) !?*c.struct_LLVMOpaqueValue {
         var ir_type: c.LLVMTypeRef = undefined;
-        switch (var_type) {
+        switch (val_type) {
             .c_int => {
                 ir_type = c.LLVMInt32TypeInContext(self.context);
             },
             else => {},
         }
-
-        // LLVM requires a null-terminated string
         var buf: [200]u8 = undefined;
-        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
-
-        const alloca = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
-        const val = try generateExpr(self, decl.value);
-
-        _ = c.LLVMBuildStore(self.builder, val, alloca);
-        
-        try self.symbols.put(name, alloca);
+        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{val});
+        return c.LLVMBuildAlloca(self.builder, ir_type, &buf);
     }
 };
