@@ -97,18 +97,13 @@ pub const SymbolTable = struct {
 
     pub fn lookupItem(self: *SymbolTable, name: []const u8) ?Symbol {
         var scope: ?*Scope = self.current_scope;
-
-        //print("looking up {s}\n", .{name});
         
         while (scope) |current| {
             if (current.symbols.get(name)) |symbol| {
-                //print("lookup succeeded.\n", .{});
                 return symbol;
             }
             scope = current.parent;
         }
-
-        //print("lookup failed. for initializations this is good.\n", .{});
         
         return null;
     }
@@ -434,11 +429,6 @@ pub const Analyzer = struct {
         }};
 
         try self.symbol_table.addItemToScope(decl.name.literal.value, decl_symbol);
-
-        //return AnalyzedNode{ .stmt = .{
-        //    .parsed = Stmt{ .var_decl = decl },
-        //    .symbol = decl_symbol,
-        //}};
     }
 
     fn collectError(self: *Analyzer, msg: ?[]const u8, val: []const u8, span: Span) !void {

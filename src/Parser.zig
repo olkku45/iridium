@@ -243,7 +243,6 @@ pub const PrecedenceTable = struct {
     }
 };
 
-// TODO: more general handling of identifiers
 pub const Parser = struct {
     tokens: []Token,
     current: usize,
@@ -303,10 +302,7 @@ pub const Parser = struct {
             .WHILE => {
                 return try whileLoop(self) orelse return null;
             },
-            else => {
-                //reportParseError(currToken(self));
-                //return ParseError.NotAStatement;
-            },
+            else => {},
         }
         return null;
     }
@@ -535,12 +531,6 @@ pub const Parser = struct {
                 }
                 
                 const right = try self.parseExpressionWithPrecedence(next_prec) orelse return null;
-
-                //print("{any}\n", .{currToken(self).token_type}); // DEBUG
-
-                // not part of expression, but rather the statement... TODO
-                //try advance(self, .SEMICOLON, "#4234 expected ';'") orelse return null;
-                
                 const expr = try self.alloc.create(Expr.BinaryExpr);
                 expr.* = .{
                     .left = left,
@@ -562,8 +552,6 @@ pub const Parser = struct {
                     .right = right,
                 };
 
-                //try advance(self, .SEMICOLON, "#94521 expected ';'") orelse return null;
-                
                 return Expr{ .binary = expr };
             },
             // function call
@@ -580,7 +568,6 @@ pub const Parser = struct {
                 }
 
                 try advance(self, .RIGHT_PAREN, "expected ')' after arguments") orelse return null;
-                //try advance(self, .SEMICOLON, "#9041 expected ';'") orelse return null;
 
                 const expr = try self.alloc.create(Expr.CallExpr);
                 expr.* = .{
@@ -603,8 +590,7 @@ pub const Parser = struct {
                     .op = bin_op,
                     .right = right,
                 };
-
-                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+                
                 return Expr{ .binary = expr };
             },
             .MINUS_EQUAL => {
@@ -619,8 +605,6 @@ pub const Parser = struct {
                     .right = right,
                 };
 
-                // TODO do this advance when parsing the statement
-                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
                 return Expr{ .binary = expr };
             },
             .STAR_EQUAL => {
@@ -635,7 +619,6 @@ pub const Parser = struct {
                     .right = right,
                 };
 
-                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
                 return Expr{ .binary = expr };
             },
             .SLASH_EQUAL => {
@@ -650,12 +633,9 @@ pub const Parser = struct {
                     .right = right,
                 };
 
-                //try advance(self, .SEMICOLON, "expected ';'") orelse return null;
                 return Expr{ .binary = expr };
             },
             else => {
-                //std.debug.print("{any}\n", .{op.token_type});
-                //return error.SomethingWentWrong;
                 const err = Expr.ErrorNode{};
                 return Expr{ .error_node = err };
             },
@@ -716,12 +696,8 @@ pub const Parser = struct {
     fn ifStmt(self: *Parser) !?Stmt {
         try advance(self, .IF, "expected 'if'") orelse return null;
         try advance(self, .LEFT_PAREN, "expected '(' after if") orelse return null;
-
-        //print("11111111\n", .{});
         
         const cond = try parseExpression(self) orelse return null;
-
-        //print("gfsdsdnlsedfsdils\n", .{});
 
         try advance(self, .RIGHT_PAREN, "expected ')' after condition") orelse return null;
 
@@ -732,22 +708,7 @@ pub const Parser = struct {
             .if_body = if_body,
         }};
     }
-
-    //fn binaryExpr(self: *Parser) !?Expr {
-    //    const left = try parseLiteral(self) orelse return null;
-    //    const op = try parseBinOperator(self) orelse return null;
-    //    const right = try parseLiteral(self) orelse return null;
-
-    //    const binary = try self.alloc.create(Expr.BinaryExpr);
-    //    binary.* = .{
-    //        .left = left,
-    //        .op = op,
-    //        .right = right,
-    //    };
-
-    //    return Expr{ .binary = binary };
-    //}
-
+    
     fn retStmt(self: *Parser) !?Stmt {
         try advance(self, .RETURN, "expected 'return'") orelse return null;
         
@@ -759,31 +720,6 @@ pub const Parser = struct {
             .value = ret_value,
         }};
     }
-
-    //fn functionCall(self: *Parser) !?Stmt {
-    //    const ident = try parseExpression(self) orelse return null;
-
-    //    try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
-
-    //    const arg = try parseExpression(self) orelse return null;
-
-    //    try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
-    //    try advance(self, .SEMICOLON, "expected ';'") orelse return null;
-
-    //    const call = try self.alloc.create(Expr.CallExpr);
-    //    call.* = .{
-    //        .func_name = ident,
-    //        .args = arg,
-    //        .func_symbol = null,
-    //        .ret_type = null,  
-    //    };
-
-    //    return Stmt{ .expr_stmt = .{
-    //        .expr = Expr {
-    //            .func_call = call,
-    //        }
-    //    }};
-    //}
 
     // TODO: variable declaration without the value
     
@@ -804,9 +740,6 @@ pub const Parser = struct {
         const var_type = try parseType(self) orelse return null;
 
         try advance(self, .EQUAL, "expected '='") orelse return null;
-
-        //std.debug.print("gggg\n", .{});
-        //std.debug.print("{any}", .{self.tokens[self.current]});
 
         const value = try parseExpression(self) orelse return null;
 
@@ -854,7 +787,6 @@ pub const Parser = struct {
         }};
     }
 
-    // TODO remove
     fn parseBinOperator(self: *Parser) !?BinaryOp {
         const op = currToken(self);
         const m = "expected operator";
