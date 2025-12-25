@@ -19,6 +19,8 @@ pub const Span = struct {
     source_file: ?[]const u8,  
 };
 
+// TODO warning exceptions for main function and println
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -64,7 +66,7 @@ pub fn main() !void {
                             .{diag.token.span.line, diag.token.lexeme}
                         );
                     } else print(
-                        "Error at line {d}: {s}; after '{s}'\n",
+                        "Error at line {d}: {s} after '{s}'\n",
                         .{diag.token.span.line, diag.msg.?, diag.token.lexeme}
                     );
                 },
@@ -86,7 +88,7 @@ pub fn main() !void {
     try stdout.flush();
 
     var analyzer = try Analyzer.init(ast, allocator);
-    try analyzer.analyze();
+    _ = try analyzer.analyze();
 
     if (analyzer.diagnostics.items.len > 0) {
         for (analyzer.diagnostics.items) |diag| {
@@ -98,14 +100,14 @@ pub fn main() !void {
                             .{diag.span.line, diag.value}
                         );
                     } else print(
-                        "Error at line {d}: {s}; from '{s}'\n",
+                        "Error at line {d}: {s} from '{s}'\n",
                         .{diag.span.line, diag.msg.?, diag.value}
                     );
                 },
                 .warn => {
                     if (diag.msg != null) {
                         print(
-                            "Warning at line {d}: {s}; from '{s}'\n",
+                            "Warning at line {d}: {s} from '{s}'\n",
                             .{diag.span.line, diag.msg.?, diag.value}
                         );
                     }

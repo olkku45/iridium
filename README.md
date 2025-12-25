@@ -1,6 +1,15 @@
 # iridium
 A programming language, focusing on modular, procedural and explicit design.
 
+## Trying an example
+
+Commands to run in the repository:
+1. `zig-out/bin/iridium examples/ANY`, where `ANY` is some example
+2. `gcc test.o`
+3. `./a.out`
+
+Don't forget to `zig build` after making changes!
+
 ## Goals
 
 I'm trying to make Iridium to learn and be a better programmer, but I also want

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("Parser.zig").Parser;
+const TypeAnnotation = @import("Parser.zig").TypeAnnotation;
 const Type = @import("Parser.zig").Type;
 const Result = @import("Analyzer.zig").Analyzer.Result;
 const Stmt = @import("Parser.zig").Stmt;
@@ -103,7 +104,6 @@ pub const CodeGen = struct {
             }
 
         c.LLVMDisposeTargetMachine(target_machine);
-
         c.LLVMDumpModule(self.module);
     }
 
@@ -144,6 +144,31 @@ pub const CodeGen = struct {
         _ = c.LLVMAddFunction(self.module, "putchar", func_type);
     }
 
+    fn generatePutchar(self: *CodeGen, expr: Expr.CallExpr) void {
+        const arg_val = expr.args[0].literal.value;
+        var putchar_char: u8 = undefined;
+
+        const func_ident = expr.func_name.literal.value;
+
+        if (std.mem.eql(u8, func_ident, "println")) {
+            for (0..arg_val.len) |i| {
+                if (i == 0 or i == arg_val.len - 1) continue;
+                createPutcharCall(self, arg_val[i]);
+            }
+            createPutcharCall(self, '\n');
+        }
+
+        // TODO: remove hardcoding that char must be character, not number
+        if (arg_val.len == 3) {
+            putchar_char = arg_val[1];
+            createPutcharCall(self, putchar_char);
+        } else {
+            if (std.mem.eql(u8, arg_val[1..3], "\\n")) {
+                createPutcharCall(self, '\n');
+            }
+        }
+    }
+
     // create main function
     fn createFunction(self: *CodeGen, name: []const u8, decl: Stmt) !void {
         // string to memory, arbitrary 200 char limit
@@ -156,133 +181,202 @@ pub const CodeGen = struct {
         const block = c.LLVMAppendBasicBlock(func, "block");
         c.LLVMPositionBuilderAtEnd(self.builder, block);
 
-        for (decl.fn_decl.fn_body) |stmt| {
-            switch (stmt) {
-                .expr_stmt => |s| {
-                    const call = s.expr.func_call.*;
-                    const arg = call.args;
-                    var putchar_char: u8 = undefined;
-
-                    const func_ident = call.func_name.literal.value;
-
-                    if (std.mem.eql(u8, func_ident, "println")) {
-                        for (0..arg.literal.value.len) |i| {
-                            if (i == 0 or i == arg.literal.value.len - 1) continue;
-                            createPutcharCall(self, arg.literal.value[i]);
-                        }
-                        createPutcharCall(self, '\n');
-                    }
-
-                    // TODO: remove hardcoding that char must be character, not number
-                    if (arg.literal.value.len == 3) {
-                        putchar_char = arg.literal.value[1];
-                        createPutcharCall(self, putchar_char);
-                    } else {
-                        if (std.mem.eql(u8, arg.literal.value[1..3], "\\n")) {
-                            createPutcharCall(self, '\n');
-                        }
-                    }
-                },
-                .var_decl => |var_decl| {
-                    try createVariableDecl(self, var_decl);  
-                },
-                .if_stmt => |if_stmt| {
-                    const then_block = c.LLVMAppendBasicBlock(func, "if-then");
-                    const else_block = c.LLVMAppendBasicBlock(func, "if-else");
-                    const merge_block = c.LLVMAppendBasicBlock(func, "if-merge");
-        
-                    const evaluated = try generateExpr(self, if_stmt.condition);
-
-                    _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, then_block);
-                    
-                    for (if_stmt.if_body) |item| {
-                        switch (item) {
-                            .expr_stmt => |expr_stmt| {
-                                const call = expr_stmt.expr.func_call.*;
-                                const arg = call.args;
-                    
-                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg.literal.value.len) |i| {
-                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
-                                        createPutcharCall(self, arg.literal.value[i]);
-                                    }
-                                    createPutcharCall(self, '\n');
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                    _ = c.LLVMBuildBr(self.builder, merge_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, else_block);
-                    
-                    _ = c.LLVMBuildBr(self.builder, merge_block);
-                    c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
-                },
-                .while_loop => |while_loop| {
-                    const cond_block = c.LLVMAppendBasicBlock(func, "while-cond");
-                    const body_block = c.LLVMAppendBasicBlock(func, "while-body");
-                    const end_block = c.LLVMAppendBasicBlock(func, "while-end");
-
-                    _ = c.LLVMBuildBr(self.builder, cond_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, cond_block);
-                    const eval_cond = try generateExpr(self, while_loop.cond);
-                    _ = c.LLVMBuildCondBr(self.builder, eval_cond, body_block, end_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, body_block);
-                    for (while_loop.body) |item| {
-                        switch (item) {
-                            .expr_stmt => |expr| {
-                                const call = expr.expr.func_call.*;
-                                const arg = call.args; // one arg
-
-                                if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
-                                    for (0..arg.literal.value.len) |i| {
-                                        if (i == 0 or i == arg.literal.value.len - 1) continue;
-                                        createPutcharCall(self, arg.literal.value[i]);
-                                    }
-                                    createPutcharCall(self, '\n');
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                    _ = c.LLVMBuildBr(self.builder, cond_block);
-
-                    c.LLVMPositionBuilderAtEnd(self.builder, end_block);
-                },
-                else => {},
-            }
-        }
+        try generateBlock(self, decl.fn_decl.fn_body, func);
 
         const ret_val = c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), 0, 0);
         _ = c.LLVMBuildRet(self.builder, ret_val);
     }
 
+    fn generateBlock(
+        self: *CodeGen,
+        stmts: []Stmt,
+        func: ?*c.struct_LLVMOpaqueValue,
+    ) anyerror!void {
+        for (stmts) |stmt| {
+            switch (stmt) {
+                .expr_stmt => |s| {
+                    _ = try generateExpr(self, s.expr);
+                },
+                .var_decl => |d| {
+                    try createVariableDecl(self, d);
+                },
+                .if_stmt => |i| {
+                    try generateIfStmt(self, i, func);
+                },
+                .while_loop => |w| {
+                    try generateWhileLoop(self, w, func);
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn generateIfStmt(
+        self: *CodeGen,
+        stmt: Stmt.IfStmt,
+        func: ?*c.struct_LLVMOpaqueValue
+    ) !void {    
+        const then_block = c.LLVMAppendBasicBlock(func, "if-then");
+        const else_block = c.LLVMAppendBasicBlock(func, "if-else");
+        const merge_block = c.LLVMAppendBasicBlock(func, "if-merge");
+
+        const evaluated = try generateExpr(self, stmt.condition);
+
+        _ = c.LLVMBuildCondBr(self.builder, evaluated, then_block, else_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, then_block);
+
+        try generateBlock(self, stmt.if_body, func);
+        
+        _ = c.LLVMBuildBr(self.builder, merge_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, else_block);
+
+        _ = c.LLVMBuildBr(self.builder, merge_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, merge_block);
+    }
+
+    fn generateWhileLoop(
+        self: *CodeGen,
+        stmt: Stmt.WhileLoop,
+        func: ?*c.struct_LLVMOpaqueValue
+    ) !void {
+        const cond_block = c.LLVMAppendBasicBlock(func, "while-cond");
+        const body_block = c.LLVMAppendBasicBlock(func, "while-body");
+        const end_block = c.LLVMAppendBasicBlock(func, "while-end");
+
+        _ = c.LLVMBuildBr(self.builder, cond_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, cond_block);
+        
+        const eval_cond = try generateExpr(self, stmt.cond);
+        
+        _ = c.LLVMBuildCondBr(self.builder, eval_cond, body_block, end_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, body_block);
+
+        try generateBlock(self, stmt.body, func);
+        
+        _ = c.LLVMBuildBr(self.builder, cond_block);
+        c.LLVMPositionBuilderAtEnd(self.builder, end_block);
+    }
+    
     fn generateExpr(self: *CodeGen, expr: Expr) anyerror!c.LLVMValueRef {
         return switch (expr) {
             .binary => try generateBinExpr(self, expr.binary.*),
-            .literal => try generateLiteral(self, expr.literal),
-            else => try generateLiteral(self, expr.literal), // temp
+            .literal => try generateLiteralExpr(self, expr.literal),
+            .unary => try generateUnaryExpr(self, expr.unary.*),
+            .grouping => try generateExprGrouping(self, expr.grouping.*),
+            .func_call => try generateFuncCallExpr(self, expr.func_call.*),
+            else => null,
         };
+    }
+
+    fn generateFuncCallExpr(self: *CodeGen, call: Expr.CallExpr) !c.LLVMValueRef {
+        // hardcoded putchar is here now
+        if (std.mem.eql(u8, call.func_name.literal.value, "println")) {
+            generatePutchar(self, call);
+            return null;
+        }
+
+        const func = c.LLVMGetNamedFunction(self.module, call.func_name.literal.value.ptr);
+        const func_type = c.LLVMGlobalGetValueType(func);
+
+        var args: std.array_list.Aligned(c.LLVMValueRef, null) = .empty;
+        for (call.args) |arg| {
+            try args.append(self.allocator, try generateExpr(self, arg));
+        }
+
+        const args_slice = try args.toOwnedSlice(self.allocator);
+
+        return c.LLVMBuildCall2(
+            self.builder,
+            func_type,
+            func,
+            args_slice.ptr,
+            @intCast(args_slice.len),
+            call.func_name.literal.value.ptr,
+        );
+    }
+
+    fn generateUnaryExpr(self: *CodeGen, unary: Expr.UnaryExpr) !c.LLVMValueRef {
+        const operand = try generateExpr(self, unary.operand);
+
+        return switch (unary.op) {
+            .NEG => c.LLVMBuildNeg(self.builder, operand, "neg"),
+            .NOT => c.LLVMBuildNot(self.builder, operand, "not"),
+        };
+    }
+
+    fn generateExprGrouping(self: *CodeGen, grouping: Expr) !c.LLVMValueRef {
+        return generateExpr(self, grouping);
     }
 
     fn generateBinExpr(self: *CodeGen, bin: Expr.BinaryExpr) !c.LLVMValueRef {
         const left = try generateExpr(self, bin.left);
         const right = try generateExpr(self, bin.right);
 
-        switch (bin.op) {
-            .GREATER => {
-                return c.LLVMBuildICmp(self.builder, c.LLVMIntSGT, left, right, "cmp");
+        // TODO load value from variable
+        return switch (bin.op) {
+            .GREATER => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSGT,
+                left,
+                right,
+                "cmp"
+            ),
+            .GREATER_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSGE,
+                left,
+                right,
+                "greater-or-equal"
+            ),
+            .LESS => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSLT,
+                left,
+                right,
+                "less"
+            ),
+            .LESS_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntSLE,
+                left,
+                right,
+                "less-or-equal"
+            ),
+            .ADD => c.LLVMBuildAdd(self.builder, left, right, "add"),
+            .SUB => c.LLVMBuildSub(self.builder, left, right, "sub"),
+            .MUL => c.LLVMBuildMul(self.builder, left, right, "mul"),
+            .DIV => c.LLVMBuildSDiv(self.builder, left, right, "div"),
+            .MODULUS => c.LLVMBuildSRem(self.builder, left, right, "mod"),
+            .EQUAL_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntEQ,
+                left,
+                right,
+                "equal"
+            ),
+            .NOT_EQUAL => c.LLVMBuildICmp(
+                self.builder,
+                c.LLVMIntNE,
+                left,
+                right,
+                "not-equal"
+            ),
+            .EQUAL => {
+                const ptr = self.symbols.get(bin.left.literal.value);
+                return c.LLVMBuildStore(self.builder, right, ptr.?);
             },
-            else => {},
-        }
-
-        return null;
+            .ADD_EQUAL => c.LLVMBuildAdd(self.builder, left, right, "add-equal"),
+            .SUB_EQUAL => c.LLVMBuildSub(self.builder, left, right, "sub-equal"),
+            .MUL_EQUAL => c.LLVMBuildMul(self.builder, left, right, "mul-equal"),
+            .DIV_EQUAL => c.LLVMBuildSDiv(self.builder, left, right, "div-equal"),
+            .AND => c.LLVMBuildAnd(self.builder, left, right, "and"),
+            .OR => c.LLVMBuildOr(self.builder, left, right, "or"),
+            // false as dummy
+            .none => c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 0, 0),
+        };
     }
 
-    fn generateLiteral(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
+    fn generateLiteralExpr(self: *CodeGen, lit: Expr.Literal) !c.LLVMValueRef {
         if (lit.type == .identifier) {
             if (std.mem.eql(u8, lit.value, "true")) {
                 return c.LLVMConstInt(c.LLVMInt1TypeInContext(self.context), 1, 0);
@@ -292,9 +386,15 @@ pub const CodeGen = struct {
 
             const alloca = self.symbols.get(lit.value);
 
+            // arbitrary limit
             var buf: [200]u8 = undefined;
             _ = try std.fmt.bufPrintZ(&buf, "{s}", .{lit.value});
-            return c.LLVMBuildLoad2(self.builder, c.LLVMInt32TypeInContext(self.context), alloca.?, &buf);
+            return c.LLVMBuildLoad2(
+                self.builder,
+                c.LLVMInt32TypeInContext(self.context),
+                alloca.?,
+                &buf
+            );
         }
 
         const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
@@ -305,24 +405,28 @@ pub const CodeGen = struct {
         const name = decl.name.literal.value;
         const var_type = decl.var_type.named.primitive;
 
+        const val = try generateExpr(self, decl.value);
+
+        const alloca = try createAlloca(self, var_type, name);
+        _ = c.LLVMBuildStore(self.builder, val, alloca);
+        
+        try self.symbols.put(name, alloca);
+    }
+
+    fn createAlloca(
+        self: *CodeGen,
+        val_type: TypeAnnotation.NamedType.PrimitiveType,
+        val: []const u8,
+    ) !?*c.struct_LLVMOpaqueValue {
         var ir_type: c.LLVMTypeRef = undefined;
-        switch (var_type) {
+        switch (val_type) {
             .c_int => {
                 ir_type = c.LLVMInt32TypeInContext(self.context);
             },
             else => {},
         }
-
-        // LLVM requires a null-terminated string
         var buf: [200]u8 = undefined;
-        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{name});
-
-        const alloca = c.LLVMBuildAlloca(self.builder, ir_type, &buf);
-
-        const val = try generateLiteral(self, decl.value.literal);
-
-        _ = c.LLVMBuildStore(self.builder, val, alloca);
-        
-        try self.symbols.put(name, alloca);
+        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{val});
+        return c.LLVMBuildAlloca(self.builder, ir_type, &buf);
     }
 };
