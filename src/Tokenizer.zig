@@ -203,7 +203,14 @@ pub const Tokenizer = struct {
     }
 
     fn addToken(self: *Tokenizer, token_type: TokenType, allocator: std.mem.Allocator) !void {
-        const text = self.source[self.start..self.current];
+        var text = self.source[self.start..self.current];
+
+        // remove quotes
+        if (text[0] == '"' and text[text.len - 1] == '"'
+        or text[0] == '\'' and text[text.len - 1] == '\'') {
+            text = text[1..text.len - 1];
+        }
+                
         const token_value = try allocator.dupe(u8, text);
         
         try self.tokens.append(allocator, Token{
