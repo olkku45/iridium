@@ -111,6 +111,7 @@ pub const CodeGen = struct {
         for (ast) |item| {
             switch (item) {
                 .extern_fn_decl => {
+                    // TODO remove the putchar hardcoding from codegen
                     declarePutchar(self);
                 },
                 .fn_decl => |declaration| {
@@ -141,7 +142,8 @@ pub const CodeGen = struct {
     fn declarePutchar(self: *CodeGen) void {
         var param_types = [_]c.LLVMTypeRef{ c.LLVMInt32TypeInContext(self.context) };
         const func_type = c.LLVMFunctionType(c.LLVMInt32TypeInContext(self.context), &param_types, 1, 0);
-        _ = c.LLVMAddFunction(self.module, "putchar", func_type);
+        const func = c.LLVMAddFunction(self.module, "putchar", func_type);
+        std.debug.print("declare putchar: {*}\n", .{func}); // DEBUG
     }
 
     fn generatePutchar(self: *CodeGen, expr: Expr.CallExpr) void {
@@ -275,7 +277,17 @@ pub const CodeGen = struct {
             return null;
         }
 
-        const func = c.LLVMGetNamedFunction(self.module, call.func_name.literal.value.ptr);
+        var buf: [256]u8 = undefined;
+        _ = try std.fmt.bufPrintZ(&buf, "{s}", .{call.func_name.literal.value});
+        const func = c.LLVMGetNamedFunction(self.module, &buf);
+
+        // DEBUG
+        std.debug.print("current function called: {s}\n", .{call.func_name.literal.value});
+        std.debug.print("Looking up putchar, found {*}\n", .{func});
+        if (func == null) {
+            std.debug.print("putchar not found!\n", .{});
+        }
+        
         const func_type = c.LLVMGlobalGetValueType(func);
 
         var args: std.array_list.Aligned(c.LLVMValueRef, null) = .empty;
@@ -396,9 +408,33 @@ pub const CodeGen = struct {
                 &buf
             );
         }
+        
+        std.debug.print("literal value: <{s}>\n", .{lit.value});
+        std.debug.print("literal type: <{any}>\n", .{lit.type});
 
-        const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
-        return c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), val, 0);
+        // TODO
+        switch (lit.type) {
+            .boolean => {
+                
+            },
+            .float => {
+                const val = try std.fmt.parseFloat(f32, lit.value);
+
+            },
+            .int => {
+                const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
+                return c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), val, 0);
+            },
+            .string => {
+                
+            },
+            .char => {
+                
+            },
+            else => {},
+        }
+
+        return null;
     }
     
     fn createVariableDecl(self: *CodeGen, decl: Stmt.VariableDecl) !void {

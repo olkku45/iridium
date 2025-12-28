@@ -19,7 +19,9 @@ pub const Span = struct {
     source_file: ?[]const u8,  
 };
 
-// TODO warning exceptions for main function and println
+test {
+    _ = @import("tests/test-compiler.zig");
+}
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

@@ -1,6 +1,10 @@
 # iridium
 A programming language, focusing on modular, procedural and explicit design.
 
+## Currently working on:
+
+- Moving away from LLVM to a custom backend
+
 ## Trying an example
 
 Commands to run in the repository:
