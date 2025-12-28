@@ -408,9 +408,33 @@ pub const CodeGen = struct {
                 &buf
             );
         }
+        
+        std.debug.print("literal value: <{s}>\n", .{lit.value});
+        std.debug.print("literal type: <{any}>\n", .{lit.type});
 
-        const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
-        return c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), val, 0);
+        // TODO
+        switch (lit.type) {
+            .boolean => {
+                
+            },
+            .float => {
+                const val = try std.fmt.parseFloat(f32, lit.value);
+
+            },
+            .int => {
+                const val = try std.fmt.parseInt(c_ulonglong, lit.value, 10);
+                return c.LLVMConstInt(c.LLVMInt32TypeInContext(self.context), val, 0);
+            },
+            .string => {
+                
+            },
+            .char => {
+                
+            },
+            else => {},
+        }
+
+        return null;
     }
     
     fn createVariableDecl(self: *CodeGen, decl: Stmt.VariableDecl) !void {

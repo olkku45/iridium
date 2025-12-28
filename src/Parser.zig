@@ -181,6 +181,7 @@ pub const LiteralType = enum {
     float,
     boolean,
     string,
+    char,
     null,
     none,
 };
@@ -228,7 +229,6 @@ pub const PrecedenceTable = struct {
             .STAR, .SLASH, .MODULUS => Precedence.mul_div_mod,
             .LEFT_PAREN, .LEFT_BRACKET => Precedence.call_access,
             else => {
-                std.debug.print("{any}\n", .{token_type});
                 return Precedence.none;
             },  
         };
@@ -290,7 +290,6 @@ pub const Parser = struct {
                 return try variableDecl(self) orelse return null;  
             },
             .IF => {
-                std.debug.print("gggg\n", .{});
                 return try ifStmt(self) orelse return null;
             },
             .IDENTIFIER => {
@@ -378,7 +377,7 @@ pub const Parser = struct {
                     },
                     .CHARACTER => {
                         try advance(self, .CHARACTER, "expected a char") orelse return null;
-                        lit_type = .int;
+                        lit_type = .char;
                     },
                     .FLOAT => {
                         try advance(self, .FLOAT, "expected a float") orelse return null;
@@ -722,7 +721,6 @@ pub const Parser = struct {
     }
 
     // TODO: variable declaration without the value
-    
     fn variableDecl(self: *Parser) !?Stmt {
         var mutable = false;
 
@@ -1082,8 +1080,5 @@ pub const Parser = struct {
             .token = token,
         };
         try self.diagnostics.append(self.alloc, diag);
-
-        //const err = Stmt{ .error_node = .{ .span = span } };
-        //try self.statements.append(self.alloc, err);
     }
 };
