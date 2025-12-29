@@ -48,8 +48,8 @@ pub const UnaryOp = enum {
     NOT,  
 };
 
-// TODO: move this to analyzer? would make more sense probably
-pub const TypeAnnotation = union(enum) {
+// TODO remove
+pub const TypeAnnotationTTT = union(enum) {
     named: NamedType,
     function: FunctionType,
 
@@ -78,6 +78,22 @@ pub const TypeAnnotation = union(enum) {
         params: []TypeAnnotation,
         return_type: *TypeAnnotation,
     };
+};
+
+pub const TypeAnnotation = enum {
+    INT8,
+    INT16,
+    INT32,
+    INT64,
+    UINT8,
+    UINT16,
+    UINT32,
+    UINT64,
+    FLOAT32,
+    FLOAT64,
+    BOOL,
+    VOID,
+    C_INT,
 };
 
 // TODO: partial nodes
@@ -684,11 +700,7 @@ pub const Parser = struct {
         return Stmt{ .fn_decl = .{
             .fn_body = func_body,
             .name = func_name,
-            .ret_type = TypeAnnotation{
-                .named = .{
-                    .primitive = ret_type,
-                },
-            },
+            .ret_type = ret_type,
         }};
     }
 
@@ -749,9 +761,7 @@ pub const Parser = struct {
             .mutable = mutable,
             .name = Expr{ .literal = var_name.literal },
             .value = value,
-            .var_type = TypeAnnotation{ .named = .{
-                .primitive = var_type,
-            }},
+            .var_type = var_type,
         }};
     }
 
@@ -776,12 +786,8 @@ pub const Parser = struct {
 
         return Stmt{ .extern_fn_decl = .{
             .name = name,
-            .arg_type = TypeAnnotation{ .named = .{
-                .primitive = arg_type,
-            }},
-            .ret_type = TypeAnnotation{ .named = .{
-                .primitive = ret_type,
-            }},
+            .arg_type = arg_type,
+            .ret_type = ret_type,
         }};
     }
 
@@ -858,62 +864,62 @@ pub const Parser = struct {
         return null;
     }
 
-    fn parseType(self: *Parser) !?TypeAnnotation.NamedType.PrimitiveType {
+    fn parseType(self: *Parser) !?TypeAnnotation {
         const curr = currToken(self);
         const m = "expected a type";
 
         switch (curr.token_type) {
             .C_INT => {
                 try advance(self, .C_INT, m) orelse return null;
-                return .c_int;
+                return .C_INT;
             },
             .UINT8 => {
                 try advance(self, .UINT8, m) orelse return null;
-                return .u8;
+                return .UINT8;
             },
             .UINT16 => {
                 try advance(self, .UINT16, m) orelse return null;
-                return .u16;
+                return .UINT16;
             },
             .UINT32 => {
                 try advance(self, .UINT32, m) orelse return null;
-                return .u32;  
+                return .UINT32;  
             },
             .UINT64 => {
                 try advance(self, .UINT64, m) orelse return null;
-                return .u64;  
+                return .UINT64;  
             },
             .INT8 => {
                 try advance(self, .INT8, m) orelse return null;
-                return .i8;  
+                return .INT8;  
             },
             .INT16 => {
                 try advance(self, .INT16, m) orelse return null;
-                return .i16;  
+                return .INT16;  
             },
             .INT32 => {
                 try advance(self, .INT32, m) orelse return null;
-                return .i32;  
+                return .INT32;  
             },
             .INT64 => {
                 try advance(self, .INT64, m) orelse return null;
-                return .i64;
+                return .INT64;
             },
             .FLOAT32 => {
                 try advance(self, .FLOAT32, m) orelse return null;
-                return .f32;  
+                return .FLOAT32;  
             },
             .FLOAT64 => {
                 try advance(self, .FLOAT64, m) orelse return null;
-                return .f64;  
+                return .FLOAT64;  
             },
             .BOOL => {
                 try advance(self, .BOOL, m) orelse return null;
-                return .bool;  
+                return .BOOL;  
             },
             .VOID => {
                 try advance(self, .VOID, m) orelse return null;
-                return .void;
+                return .VOID;
             },
             else => {
                 // TODO see if taking previous token causes further issues, currently
