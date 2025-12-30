@@ -1,0 +1,178 @@
+const std = @import("std");
+const Stmt = @import("Parser.zig").Stmt;
+const Expr = @import("Parser.zig").Expr;
+const Type = @import("Parser.zig").Type;
+const BinaryOp = @import("Parser.zig").BinaryOp;
+const UnaryOp = @import("Parser.zig").UnaryOp;
+
+const Parameter = struct {
+    name: Expr.Literal,
+    param_type: Type,
+};
+
+pub const Instruction = union(enum) {
+    function: Function,
+    allocation: Allocation,
+    expression: Expression,
+    ret: FuncReturn,
+    assignment: Assignment,
+    
+    const Function = struct {
+        name: Expr.Literal,
+        func_type: Type,
+        params: ?[]Parameter,
+    };
+
+    const Allocation = struct {
+        name: Expr.Literal,
+        alloc_type: Type,
+    };
+
+    const Expression = struct {
+        temp: []const u8,
+        op: union(enum) { BinaryOp, UnaryOp },
+        first: Expr,
+        second: ?Expr,
+    };
+
+    const FuncReturn = struct {
+        ret_val: Expr,
+    };
+
+    const Assignment = struct {
+        to: Instruction,
+        from: []const u8, // temp e.g. t0
+    };
+};
+
+fn initInstructions() std.ArrayList(Instruction) {
+    const arr: std.array_list.Aligned(Instruction, null) = .empty;
+    return arr;
+}
+
+pub const IRGenerator = struct {
+    ast: []Stmt,
+    ir: std.ArrayList(Instruction),
+    allocator: std.mem.Allocator,
+    temp_count: usize,
+
+    pub fn init(ast: []Stmt, allocator: std.mem.Allocator) IRGenerator {
+        return IRGenerator{
+            .ast = ast,
+            .ir = initInstructions(),
+            .allocator = allocator,
+            .temp_count = 0,
+        };
+    }
+
+    pub fn generateIr(self: *IRGenerator) ![]Instruction {
+        for (self.ast) |stmt| {
+            try generateInstruction(self, stmt);
+        }
+        const slice = try self.ir.toOwnedSlice(self.allocator);
+        return slice;
+    }
+
+    fn generateInstruction(self: *IRGenerator, stmt: Stmt) !void {
+        switch (stmt) {
+            .fn_decl => |fn_decl| {
+                try generateFunctionInstruction(self, fn_decl);
+            },
+            .var_decl => |var_decl| {
+                try generateVarInstruction(self, var_decl);
+            },
+            .ret_stmt => |ret| {
+                try generateRetInstruction(self, ret);
+            },
+            else => {},
+        }
+    }
+
+    fn generateFunctionInstruction(self: *IRGenerator, fn_decl: Stmt.FnDecl) !void {
+        const func = Instruction{ .function = .{
+            .func_type = fn_decl.ret_type,
+            .name = fn_decl.name,
+            .params = null, // no params yet
+        }};
+        try self.ir.append(self.allocator, func);
+
+        for (fn_decl.fn_body) |stmt| {
+            try generateInstruction(self, stmt);
+        }
+    }
+
+    fn generateVarInstruction(self: *IRGenerator, var_decl: Stmt.VariableDecl) !void {
+        const variable = Instruction{ .allocation = .{
+            .alloc_type = var_decl.var_type,
+            .name = var_decl.name,
+        }};
+        try self.ir.append(self.allocator, variable);
+
+        const temp = try generateExpr(self, var_decl.value);
+
+        const assignment = Instruction{ .assignment = .{
+            .to = variable,
+            .from = temp,
+        }};
+        try self.ir.append(self.allocator, assignment);
+    }
+
+    fn generateRetInstruction(self: *IRGenerator, ret_stmt: Stmt.RetStmt) !void {
+        const ret = Instruction{ .ret = .{
+            .ret_val = ret_stmt.value,
+        }};
+        try self.ir.append(self.allocator, ret);
+    }
+
+    fn generateExpr(self: *IRGenerator, expr: Expr) ![]const u8 {
+        switch (expr) {
+            .literal => |lit| {
+                return lit.value;
+            },
+            .binary => |bin| {
+                const left = try generateExpr(self, bin.left);
+                const right = try generateExpr(self, bin.right);
+
+                const temp = try createTemp(self);
+
+                const instruction = Instruction{ .expression = .{
+                    .temp = temp,
+                    .op = .{ .BinaryOp = bin.op },
+                    .first = left,
+                    .second = right,
+                }};
+                
+                try self.ir.append(self.allocator, instruction);
+
+                return temp;
+            },
+            .unary => |un| {
+                const operand = try generateExpr(self, un.operand);
+
+                const temp = try createTemp(self);
+
+                const instruction = Instruction{ .expression = .{
+                    .temp = temp,
+                    .op = .{ .UnaryOp = un.op },
+                    .first = operand,
+                    .second = null,
+                }};
+
+                try self.ir.append(self.allocator, instruction);
+
+                return temp;
+            },
+            .grouping => |group| {
+                try generateExpr(self, group);
+            },
+            .func_call => {},
+            else => {},
+        }
+    }
+
+    fn createTemp(self: *IRGenerator) ![]const u8 {
+        const temp = try std.fmt.allocPrint(self.allocator, "t{d}", .{self.temp_count});
+        self.temp_count += 1;
+        return temp;
+    }
+};
