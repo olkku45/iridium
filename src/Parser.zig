@@ -48,39 +48,7 @@ pub const UnaryOp = enum {
     NOT,  
 };
 
-// TODO remove
-pub const TypeAnnotationTTT = union(enum) {
-    named: NamedType,
-    function: FunctionType,
-
-    pub const NamedType = union(enum) {
-        primitive: PrimitiveType,
-        // user_defined: []const u8,  coming soon
-
-        pub const PrimitiveType = enum {
-            i8,
-            i16,
-            i32,
-            i64,
-            u8,
-            u16,
-            u32,
-            u64,
-            f32,
-            f64,
-            bool,
-            void,
-            c_int,
-        };
-    };
-
-    pub const FunctionType = union(enum) {
-        params: []TypeAnnotation,
-        return_type: *TypeAnnotation,
-    };
-};
-
-pub const TypeAnnotation = enum {
+pub const Type = enum {
     INT8,
     INT16,
     INT32,
@@ -94,6 +62,7 @@ pub const TypeAnnotation = enum {
     BOOL,
     VOID,
     C_INT,
+    CUSTOM,
 };
 
 // TODO: partial nodes
@@ -115,8 +84,8 @@ pub const Stmt = union(enum) {
 
     pub const ExternFnDecl = struct {
         name: Expr,
-        arg_type: TypeAnnotation,
-        ret_type: TypeAnnotation,
+        arg_type: Type,
+        ret_type: Type,
 
         //symbol: ?*Symbol,
     };
@@ -125,7 +94,7 @@ pub const Stmt = union(enum) {
         name: Expr,
         fn_body: []Stmt,
         //params: , COMING SOON!!!
-        ret_type: TypeAnnotation,
+        ret_type: Type,
 
         //symbol: ?*Symbol,
     };
@@ -134,7 +103,7 @@ pub const Stmt = union(enum) {
         name: Expr,
         value: Expr,
         mutable: bool,
-        var_type: TypeAnnotation,
+        var_type: Type,
         //symbol: ?*Symbol,
     };
 
@@ -864,7 +833,7 @@ pub const Parser = struct {
         return null;
     }
 
-    fn parseType(self: *Parser) !?TypeAnnotation {
+    fn parseType(self: *Parser) !?Type {
         const curr = currToken(self);
         const m = "expected a type";
 

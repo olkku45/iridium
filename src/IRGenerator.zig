@@ -16,33 +16,36 @@ pub const Instruction = union(enum) {
     expression: Expression,
     ret: FuncReturn,
     assignment: Assignment,
+    func_end: FuncEnd,
     
-    const Function = struct {
+    pub const Function = struct {
         name: Expr.Literal,
         func_type: Type,
         params: ?[]Parameter,
     };
 
-    const Allocation = struct {
+    pub const Allocation = struct {
         name: Expr.Literal,
         alloc_type: Type,
     };
 
-    const Expression = struct {
+    pub const Expression = struct {
         temp: []const u8,
-        op: union(enum) { BinaryOp, UnaryOp },
-        first: Expr,
-        second: ?Expr,
+        op: union(enum) { bin: BinaryOp, un: UnaryOp },
+        first: []const u8,
+        second: ?[]const u8,
     };
 
-    const FuncReturn = struct {
+    pub const FuncReturn = struct {
         ret_val: Expr,
     };
 
-    const Assignment = struct {
-        to: Instruction,
+    pub const Assignment = struct {
+        to: []const u8,
         from: []const u8, // temp e.g. t0
     };
+
+    pub const FuncEnd = struct {};
 };
 
 fn initInstructions() std.ArrayList(Instruction) {
@@ -73,7 +76,7 @@ pub const IRGenerator = struct {
         return slice;
     }
 
-    fn generateInstruction(self: *IRGenerator, stmt: Stmt) !void {
+    fn generateInstruction(self: *IRGenerator, stmt: Stmt) anyerror!void {
         switch (stmt) {
             .fn_decl => |fn_decl| {
                 try generateFunctionInstruction(self, fn_decl);
@@ -91,7 +94,7 @@ pub const IRGenerator = struct {
     fn generateFunctionInstruction(self: *IRGenerator, fn_decl: Stmt.FnDecl) !void {
         const func = Instruction{ .function = .{
             .func_type = fn_decl.ret_type,
-            .name = fn_decl.name,
+            .name = fn_decl.name.literal,
             .params = null, // no params yet
         }};
         try self.ir.append(self.allocator, func);
@@ -99,20 +102,23 @@ pub const IRGenerator = struct {
         for (fn_decl.fn_body) |stmt| {
             try generateInstruction(self, stmt);
         }
+
+        const end = Instruction{ .func_end = Instruction.FuncEnd{}};
+        try self.ir.append(self.allocator, end);
     }
 
     fn generateVarInstruction(self: *IRGenerator, var_decl: Stmt.VariableDecl) !void {
         const variable = Instruction{ .allocation = .{
             .alloc_type = var_decl.var_type,
-            .name = var_decl.name,
+            .name = var_decl.name.literal,
         }};
         try self.ir.append(self.allocator, variable);
 
         const temp = try generateExpr(self, var_decl.value);
 
         const assignment = Instruction{ .assignment = .{
-            .to = variable,
-            .from = temp,
+            .to = var_decl.name.literal.value,
+            .from = temp.?,
         }};
         try self.ir.append(self.allocator, assignment);
     }
@@ -124,7 +130,7 @@ pub const IRGenerator = struct {
         try self.ir.append(self.allocator, ret);
     }
 
-    fn generateExpr(self: *IRGenerator, expr: Expr) ![]const u8 {
+    fn generateExpr(self: *IRGenerator, expr: Expr) !?[]const u8 {
         switch (expr) {
             .literal => |lit| {
                 return lit.value;
@@ -137,9 +143,9 @@ pub const IRGenerator = struct {
 
                 const instruction = Instruction{ .expression = .{
                     .temp = temp,
-                    .op = .{ .BinaryOp = bin.op },
-                    .first = left,
-                    .second = right,
+                    .op = .{ .bin = bin.op },
+                    .first = left.?,
+                    .second = right.?,
                 }};
                 
                 try self.ir.append(self.allocator, instruction);
@@ -153,8 +159,8 @@ pub const IRGenerator = struct {
 
                 const instruction = Instruction{ .expression = .{
                     .temp = temp,
-                    .op = .{ .UnaryOp = un.op },
-                    .first = operand,
+                    .op = .{ .un = un.op },
+                    .first = operand.?,
                     .second = null,
                 }};
 
@@ -163,11 +169,14 @@ pub const IRGenerator = struct {
                 return temp;
             },
             .grouping => |group| {
-                try generateExpr(self, group);
+                // value not needed
+                const temp = try generateExpr(self, group.*);
+                return temp;
             },
             .func_call => {},
             else => {},
         }
+        return null;
     }
 
     fn createTemp(self: *IRGenerator) ![]const u8 {

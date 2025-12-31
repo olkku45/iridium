@@ -3,8 +3,10 @@ const Tokenizer = @import("Tokenizer.zig").Tokenizer;
 const Token = @import("Tokenizer.zig").Token;
 const Parser = @import("Parser.zig").Parser;
 const Analyzer = @import("Analyzer.zig").Analyzer;
-const CodeGen = @import("CodeGen.zig").CodeGen;
+//const CodeGen = @import("CodeGen.zig").CodeGen;
 const AstPrinter = @import("AstPrinter.zig").AstPrinter;
+const IRGenerator = @import("IRGenerator.zig").IRGenerator;
+const IRPrinter = @import("IRPrinter.zig").IRPrinter;
 
 const print = std.debug.print;
 
@@ -120,10 +122,18 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    var code_gen = CodeGen.init(allocator);
-    try code_gen.compile(ast);
+    var ir_gen = IRGenerator.init(ast, allocator);
+    const instructions = try ir_gen.generateIr();
 
-    code_gen.deinit();
+    var ir_printer = IRPrinter.init(instructions, allocator, stdout);
+    try ir_printer.printInstructions();
+
+    try stdout.flush();
+
+    //var code_gen = CodeGen.init(allocator);
+    //try code_gen.compile(ast);
+
+    //code_gen.deinit();
 }
 
 pub fn reportError(line: usize, where: []const u8, message: []const u8) void {
