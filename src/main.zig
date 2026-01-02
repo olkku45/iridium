@@ -32,19 +32,11 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     var args = std.process.args();
-    var file_name: []const u8 = "";
 
-    while (true) {
-        if (args.inner.count == 1) break;
-        if (args.inner.index == 1) {
-            file_name = args.next().?;
-            break;
-        }
-        args.inner.index += 1;
-    }
+    _ = args.skip();
+    const file_name = args.next() orelse return error.SomethingWentWrong;
 
-    const file_extension = ".ird";
-    if (std.mem.count(u8, file_name, file_extension) != 1) return error.NotIridiumFile;
+    if (!std.mem.endsWith(u8, file_name, ".ird")) return error.NotIridiumFile;
 
     const file_str = try std.fs.cwd().readFileAlloc(allocator, file_name, 1_000_000_000);
 
@@ -52,7 +44,7 @@ pub fn main() !void {
     const line_tokens = try tokenizer.getTokens(allocator);
 
     //for (0..line_tokens.len) |i| {
-    //    print("{d} : {any}\n\n", .{i, line_tokens[i]});
+    //    print("{d} : {any}\n", .{i, line_tokens[i]});
     //}
 
     var parser = Parser.init(line_tokens, allocator);
@@ -130,10 +122,7 @@ pub fn main() !void {
 
     try stdout.flush();
 
-    //var code_gen = CodeGen.init(allocator);
-    //try code_gen.compile(ast);
-
-    //code_gen.deinit();
+    // TODO add codegen
 }
 
 pub fn reportError(line: usize, where: []const u8, message: []const u8) void {
