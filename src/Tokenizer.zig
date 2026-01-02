@@ -172,7 +172,7 @@ pub const Tokenizer = struct {
     current: usize,
     line: usize,
     col: usize,
-    keywords: std.StringHashMap(TokenType),
+    keywords: std.StaticStringMap(TokenType),
     tokens: std.ArrayList(Token),
     alloc: std.mem.Allocator,
 
@@ -192,7 +192,7 @@ pub const Tokenizer = struct {
     pub fn getTokens(self: *Tokenizer) ![]Token {
         while (!isAtEnd(self)) {
             self.start = self.current;
-            try getToken(self, self.alloc);
+            try getToken(self);
         }
 
         return self.tokens.toOwnedSlice(self.alloc);

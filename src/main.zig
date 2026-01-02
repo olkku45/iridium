@@ -41,7 +41,7 @@ pub fn main() !void {
     const file_str = try std.fs.cwd().readFileAlloc(allocator, file_name, 1_000_000_000);
 
     var tokenizer = try Tokenizer.init(allocator, file_str);
-    const line_tokens = try tokenizer.getTokens(allocator);
+    const line_tokens = try tokenizer.getTokens();
 
     //for (0..line_tokens.len) |i| {
     //    print("{d} : {any}\n", .{i, line_tokens[i]});
@@ -72,8 +72,8 @@ pub fn main() !void {
         std.process.exit(0);
     }
     
-    var stdout_buffer = try allocator.alloc(u8, 8_000);
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout_buffer = try allocator.alloc(u8, 8_000);
+    var stdout_writer = std.fs.File.stdout().writer(stdout_buffer);
     const stdout = &stdout_writer.interface;
     
     var printer = AstPrinter.init(stdout);
