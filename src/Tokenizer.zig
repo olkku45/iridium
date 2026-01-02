@@ -164,6 +164,7 @@ fn initKeywords() !std.StaticStringMap(TokenType) {
 const Error = error{
     SemicolonNotAtEOL,
     WrongCharacter,
+    UnexpectedCharacter,
 };
 
 pub const Tokenizer = struct {
@@ -294,6 +295,8 @@ pub const Tokenizer = struct {
                     try number(self);
                 } else if (isAlphaNumeric(char)) {
                     try identifier(self);
+                } else {
+                    return error.UnexpectedCharacter;
                 }
             },
         }
