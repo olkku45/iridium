@@ -74,7 +74,6 @@ pub fn main() !void {
     
     var stdout_buffer = try allocator.alloc(u8, 8_000);
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-
     const stdout = &stdout_writer.interface;
     
     var printer = AstPrinter.init(stdout);
@@ -122,8 +121,4 @@ pub fn main() !void {
     try stdout.flush();
 
     // TODO add codegen
-}
-
-pub fn reportError(line: usize, where: []const u8, message: []const u8) void {
-    print("[line {d} ] Error {s}: {s}", .{line, where, message});
 }
