@@ -243,18 +243,19 @@ pub const Tokenizer = struct {
             ';' => try addToken(self, .SEMICOLON),
             '/' => {
                 if (peek(self) == '*') {
-                    while (peek(self) != '*' or peekNext(self) != '/') {
+                    advance(self);
+                    while (!isAtEnd(self)) {
+                        if (peek(self) == '*' and peekNext(self) == '/') {
+                            advance(self);
+                            advance(self);
+                            break;
+                        }
                         if (peek(self) == '\n') {
-                            advance(self);
-                            advance(self);
                             self.line += 1;
                             resetCol(self);
                         }
                         advance(self);
                     }
-
-                    advance(self);
-                    advance(self);
                 } else if (match(self, '/')) {
                     while (peek(self) != '\n' and !isAtEnd(self)) advance(self);
                 } else {
@@ -317,27 +318,6 @@ pub const Tokenizer = struct {
         advance(self);
 
         try addToken(self, .STRING);
-    }
-
-    // this seems to do the same as peek() on the surface,
-    // but this is used in a context where the current char
-    // we're looking at is actually the current char,
-    // we haven't actually advanced past the current char,
-    // unlike with peek() we actually have, but not in the
-    // peek()-function itself. but really the only difference
-    // are the names. same with nextChar and peekNext
-    fn currentChar(self: *Tokenizer) u8 {
-        return self.source[self.current];
-    }
-
-    fn nextChar(self: *Tokenizer) !u8 {
-        if (isAtEnd(self)) return Error.WrongCharacter;
-        return self.source[self.current + 1];
-    }
-
-    fn prevChar(self: *Tokenizer) !u8 {
-        if (isAtStart(self)) return Error.WrongCharacter;
-        return self.source[self.current - 1];
     }
 
     fn peek(self: *Tokenizer) u8 {
