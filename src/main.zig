@@ -72,8 +72,7 @@ pub fn main() !void {
         std.process.exit(0);
     }
     
-    // 100k chars max printed ast len now (arbitrary)
-    var stdout_buffer: [100_000]u8 = undefined; 
+    var stdout_buffer = try allocator.alloc(u8, 8_000);
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 
     const stdout = &stdout_writer.interface;
