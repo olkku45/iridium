@@ -108,61 +108,55 @@ fn initTokens() std.array_list.Aligned(Token, null) {
     return tokens_list;
 }
 
-fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
-    var keywords = std.StringHashMap(TokenType).init(allocator);
-
-    try keywords.put("use", .USE);
-    try keywords.put("let", .LET);
-    try keywords.put("mut", .MUT);
-    try keywords.put("const", .CONST);
-    try keywords.put("global", .GLOBAL);
-    try keywords.put("fn", .FN);
-    try keywords.put("for", .FOR);
-    try keywords.put("while", .WHILE);
-    try keywords.put("return", .RETURN);
-    //try keywords.put("struct", .STRUCT);
-    //try keywords.put("enum", .ENUM);
-    //try keywords.put("union", .UNION);
-    try keywords.put("continue", .CONTINUE);
-    try keywords.put("BREAK", .BREAK);
-    try keywords.put("switch", .SWITCH);
-    try keywords.put("if", .IF);
-    try keywords.put("else", .ELSE);
-    try keywords.put("std", .STD);
-    try keywords.put("lib", .LIB);
-    try keywords.put("extern", .EXTERN);
-    try keywords.put("catch", .CATCH);
-    try keywords.put("assert", .ASSERT);
-    try keywords.put("suppress", .SUPPRESS);
-    //try keywords.put("exclude", .EXCLUDE);
-    try keywords.put("throw", .THROW);
-    try keywords.put("in", .IN);
-    try keywords.put("as", .AS);
-    try keywords.put("try", .TRY);
-    try keywords.put("pub", .PUB);
-    try keywords.put("and", .AND);
-    try keywords.put("or", .OR);
-
-    // primitive types here as well
-    try keywords.put("u8", .UINT8);
-    try keywords.put("u16", .UINT16);
-    try keywords.put("u32", .UINT32);
-    try keywords.put("u64", .UINT64);
-    try keywords.put("i8", .INT8);
-    try keywords.put("i16", .INT16);
-    try keywords.put("i32", .INT32);
-    try keywords.put("i64", .INT64);
-    try keywords.put("f32", .FLOAT32);
-    try keywords.put("f64", .FLOAT64);
-    try keywords.put("bool", .BOOL); // type marker
-    try keywords.put("true", .TRUE);
-    try keywords.put("false", .FALSE);
-    try keywords.put("void", .VOID);
-    try keywords.put("c_int", .C_INT);
-    try keywords.put("c_float", .C_FLOAT);
-    try keywords.put("c_double", .C_DOUBLE);
-    try keywords.put("c_char", .C_CHAR);
-    try keywords.put("null", .NULL);
+fn initKeywords() !std.StaticStringMap(TokenType) {
+    const keywords = std.StaticStringMap(TokenType).initComptime(.{
+        .{"use", .USE},
+        .{"let", .LET},
+        .{"mut", .MUT},
+        .{"const", .CONST},
+        .{"global", .GLOBAL},
+        .{"fn", .FN},
+        .{"for", .FOR},
+        .{"while", .WHILE},
+        .{"return", .RETURN},
+        .{"continue", .CONTINUE},
+        .{"break", .BREAK},
+        .{"switch", .SWITCH},
+        .{"if", .IF},
+        .{"else", .ELSE},
+        .{"std", .STD},
+        .{"lib", .LIB},
+        .{"extern", .EXTERN},
+        .{"catch", .CATCH},
+        .{"assert", .ASSERT},
+        .{"suppress", .SUPPRESS},
+        .{"throw", .THROW},
+        .{"in", .IN},
+        .{"as", .AS},
+        .{"try", .TRY},
+        .{"pub", .PUB},
+        .{"and", .AND},
+        .{"or", .OR},
+        .{"u8", .UINT8},
+        .{"u16", .UINT16},
+        .{"u32", .UINT32},
+        .{"u64", .UINT64},
+        .{"i8", .INT8},
+        .{"i16", .INT16},
+        .{"i32", .INT32},
+        .{"i64", .INT64},
+        .{"f32", .FLOAT32},
+        .{"f64", .FLOAT64},
+        .{"bool", .BOOL},
+        .{"true", .TRUE},
+        .{"false", .FALSE},
+        .{"void", .VOID},
+        .{"c_int", .C_INT},
+        .{"c_float", .C_FLOAT},
+        .{"c_double", .C_DOUBLE},
+        .{"c_char", .C_CHAR},
+        .{"null", .NULL},
+    });
 
     return keywords;
 }
@@ -170,6 +164,7 @@ fn initKeywords(allocator: std.mem.Allocator) !std.StringHashMap(TokenType) {
 const Error = error{
     SemicolonNotAtEOL,
     WrongCharacter,
+    UnexpectedCharacter,
 };
 
 pub const Tokenizer = struct {
@@ -178,8 +173,9 @@ pub const Tokenizer = struct {
     current: usize,
     line: usize,
     col: usize,
-    keywords: std.StringHashMap(TokenType),
-    tokens: std.array_list.Aligned(Token, null),
+    keywords: std.StaticStringMap(TokenType),
+    tokens: std.ArrayList(Token),
+    alloc: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) !Tokenizer {
         return Tokenizer{
@@ -188,21 +184,24 @@ pub const Tokenizer = struct {
             .current = 0,
             .line = 1,
             .col = 1,
-            .keywords = try initKeywords(allocator),
+            .keywords = try initKeywords(),
             .tokens = initTokens(),
+            .alloc = allocator,
         };
     }
 
-    pub fn getTokens(self: *Tokenizer, allocator: std.mem.Allocator) ![]Token {
+    pub fn getTokens(self: *Tokenizer) ![]Token {
         while (!isAtEnd(self)) {
             self.start = self.current;
-            try getToken(self, allocator);
+            try getToken(self);
         }
 
-        return self.tokens.toOwnedSlice(allocator);
+        return self.tokens.toOwnedSlice(self.alloc);
     }
 
-    fn addToken(self: *Tokenizer, token_type: TokenType, allocator: std.mem.Allocator) !void {
+    // TODO can we remove the allocating from this? this was causing some bug
+    // without the heap allocation
+    fn addToken(self: *Tokenizer, token_type: TokenType) !void {
         var text = self.source[self.start..self.current];
 
         // remove quotes
@@ -211,9 +210,9 @@ pub const Tokenizer = struct {
             text = text[1..text.len - 1];
         }
                 
-        const token_value = try allocator.dupe(u8, text);
+        const token_value = try self.alloc.dupe(u8, text);
         
-        try self.tokens.append(allocator, Token{
+        try self.tokens.append(self.alloc, Token{
             .lexeme = token_value,
             .token_type = token_type,
             .span = Span{
@@ -225,60 +224,61 @@ pub const Tokenizer = struct {
          });
     }
 
-    fn getToken(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+    fn getToken(self: *Tokenizer) !void {
         const char = getCharAdvance(self);
 
         switch (char) {
-            '(' => try addToken(self, .LEFT_PAREN, alloc),
-            ')' => try addToken(self, .RIGHT_PAREN, alloc),
-            '[' => try addToken(self, .LEFT_BRACKET, alloc),
-            ']' => try addToken(self, .RIGHT_BRACKET, alloc),
-            '{' => try addToken(self, .LEFT_BRACE, alloc),
-            '}' => try addToken(self, .RIGHT_BRACE, alloc),
-            ',' => try addToken(self, .COMMA, alloc),
-            '.' => try addToken(self, .DOT, alloc),
+            '(' => try addToken(self, .LEFT_PAREN),
+            ')' => try addToken(self, .RIGHT_PAREN),
+            '[' => try addToken(self, .LEFT_BRACKET),
+            ']' => try addToken(self, .RIGHT_BRACKET),
+            '{' => try addToken(self, .LEFT_BRACE),
+            '}' => try addToken(self, .RIGHT_BRACE),
+            ',' => try addToken(self, .COMMA),
+            '.' => try addToken(self, .DOT),
             '-' => {
-                if (match(self, '=')) try addToken(self, .MINUS_EQUAL, alloc)
-                else try addToken(self, .MINUS, alloc);
+                if (match(self, '=')) try addToken(self, .MINUS_EQUAL)
+                else try addToken(self, .MINUS);
             },
-            '+' => if (match(self, '=')) try addToken(self, .PLUS_EQUAL, alloc) else try addToken(self, .PLUS, alloc),
-            ';' => try addToken(self, .SEMICOLON, alloc),
+            '+' => if (match(self, '=')) try addToken(self, .PLUS_EQUAL) else try addToken(self, .PLUS),
+            ';' => try addToken(self, .SEMICOLON),
             '/' => {
                 if (peek(self) == '*') {
-                    while (peek(self) != '*' or peekNext(self) != '/') {
+                    advance(self);
+                    while (!isAtEnd(self)) {
+                        if (peek(self) == '*' and peekNext(self) == '/') {
+                            advance(self);
+                            advance(self);
+                            break;
+                        }
                         if (peek(self) == '\n') {
-                            advance(self);
-                            advance(self);
                             self.line += 1;
                             resetCol(self);
                         }
                         advance(self);
                     }
-
-                    advance(self);
-                    advance(self);
                 } else if (match(self, '/')) {
                     while (peek(self) != '\n' and !isAtEnd(self)) advance(self);
                 } else {
-                    if (match(self, '=')) try addToken(self, .SLASH_EQUAL, alloc) else try addToken(self, .SLASH, alloc);
+                    if (match(self, '=')) try addToken(self, .SLASH_EQUAL) else try addToken(self, .SLASH);
                 }
             },
-            '*' => if (match(self, '=')) try addToken(self, .STAR_EQUAL, alloc) else try addToken(self, .STAR, alloc),
-            '?' => try addToken(self, .QUERY, alloc),
-            ':' => try addToken(self, .COLON, alloc),
-            '%' => try addToken(self, .MODULUS, alloc),
+            '*' => if (match(self, '=')) try addToken(self, .STAR_EQUAL) else try addToken(self, .STAR),
+            '?' => try addToken(self, .QUERY),
+            ':' => try addToken(self, .COLON),
+            '%' => try addToken(self, .MODULUS),
 
-            '!' => if (match(self, '=')) try addToken(self, .BANG_EQUAL, alloc) else try addToken(self, .BANG, alloc),
+            '!' => if (match(self, '=')) try addToken(self, .BANG_EQUAL) else try addToken(self, .BANG),
             '=' => {
                 if (match(self, '>')) {
-                    try addToken(self, .RIGHT_ARROW, alloc);
+                    try addToken(self, .RIGHT_ARROW);
                     return;
                 }
-                if (match(self, '=')) try addToken(self, .EQUAL_EQUAL, alloc)
-                else try addToken(self, .EQUAL, alloc);
+                if (match(self, '=')) try addToken(self, .EQUAL_EQUAL)
+                else try addToken(self, .EQUAL);
             },
-            '>' => if (match(self, '=')) try addToken(self, .GREATER_EQUAL, alloc) else try addToken(self, .GREATER, alloc),
-            '<' => if (match(self, '=')) try addToken(self, .LESS_EQUAL, alloc) else try addToken(self, .LESS, alloc),
+            '>' => if (match(self, '=')) try addToken(self, .GREATER_EQUAL) else try addToken(self, .GREATER),
+            '<' => if (match(self, '=')) try addToken(self, .LESS_EQUAL) else try addToken(self, .LESS),
 
             ' ', '\t', '\r' => {},
 
@@ -287,29 +287,29 @@ pub const Tokenizer = struct {
                 resetCol(self);
             },
 
-            '"' => try string(self, alloc),
-            '\'' => try character(self, alloc),
+            '"' => try string(self),
+            '\'' => try character(self),
 
             else => {
                 if (isDigit(char)) {
-                    try number(self, alloc);
+                    try number(self);
                 } else if (isAlphaNumeric(char)) {
-                    try identifier(self, alloc);
+                    try identifier(self);
                 } else {
-                    main.reportError(self.line, "", "Unexpected character");
+                    return error.UnexpectedCharacter;
                 }
             },
         }
     }
 
-    fn character(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+    fn character(self: *Tokenizer) !void {
         while (peek(self) != '\'' and !isAtEnd(self)) advance(self);
         advance(self);
 
-        try addToken(self, .CHARACTER, alloc);
+        try addToken(self, .CHARACTER);
     }
 
-    fn string(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+    fn string(self: *Tokenizer) !void {
         while (peek(self) != '"' and !isAtEnd(self)) {
             if (peek(self) == '\n') {
                 self.line += 1;
@@ -320,28 +320,7 @@ pub const Tokenizer = struct {
 
         advance(self);
 
-        try addToken(self, .STRING, alloc);
-    }
-
-    // this seems to do the same as peek() on the surface,
-    // but this is used in a context where the current char
-    // we're looking at is actually the current char,
-    // we haven't actually advanced past the current char,
-    // unlike with peek() we actually have, but not in the
-    // peek()-function itself. but really the only difference
-    // are the names. same with nextChar and peekNext
-    fn currentChar(self: *Tokenizer) u8 {
-        return self.source[self.current];
-    }
-
-    fn nextChar(self: *Tokenizer) !u8 {
-        if (isAtEnd(self)) return Error.WrongCharacter;
-        return self.source[self.current + 1];
-    }
-
-    fn prevChar(self: *Tokenizer) !u8 {
-        if (isAtStart(self)) return Error.WrongCharacter;
-        return self.source[self.current - 1];
+        try addToken(self, .STRING);
     }
 
     fn peek(self: *Tokenizer) u8 {
@@ -377,7 +356,7 @@ pub const Tokenizer = struct {
         return char >= '0' and char <= '9';
     }
 
-    fn number(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+    fn number(self: *Tokenizer) !void {
         while (isDigit(peek(self))) advance(self);
 
         if (peek(self) == '.' and isDigit(peekNext(self))) {
@@ -385,11 +364,11 @@ pub const Tokenizer = struct {
 
             while (isDigit(peek(self))) advance(self);
 
-            try addToken(self, .FLOAT, alloc);
+            try addToken(self, .FLOAT);
             return;
         }
 
-        try addToken(self, .INTEGER, alloc);
+        try addToken(self, .INTEGER);
     }
 
     fn peekNext(self: *Tokenizer) u8 {
@@ -402,13 +381,13 @@ pub const Tokenizer = struct {
             (char == '_');
     }
 
-    fn identifier(self: *Tokenizer, alloc: std.mem.Allocator) !void {
+    fn identifier(self: *Tokenizer) !void {
         while (isAlphaNumeric(peek(self))) advance(self);
 
         const text = self.source[self.start..self.current];
         const token_type = self.keywords.get(text) orelse TokenType.IDENTIFIER;
 
-        try addToken(self, token_type, alloc);
+        try addToken(self, token_type);
     }
 
     fn isAlphaNumeric(char: u8) bool {

@@ -2,7 +2,7 @@ const std = @import("std");
 const Stmt = @import("Parser.zig").Stmt;
 const Span = @import("main.zig").Span;
 const Expr = @import("Parser.zig").Expr;
-const TypeAnnotation = @import("Parser.zig").TypeAnnotation;
+const Type = @import("Parser.zig").Type;
 const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
@@ -31,9 +31,7 @@ pub const Symbol = union(enum) {
         mutable: bool,
         name: []const u8,
         value: Expr,
-        type: TypeAnnotation,
-        //llvm_value: ?c.LLVMValueRef,
-        //llvm_type: ?c.LLVMTypeRef,
+        type: Type,
     };
 
     pub const FunctionSymbol = struct {
@@ -41,19 +39,15 @@ pub const Symbol = union(enum) {
         ref_count: *u32,
         name: []const u8,
         //param_types: []TypeAnnotation,
-        ret_type: TypeAnnotation,
-        //llvm_param_types: ?[]c.LLVMTypeRef,
-        //llvm_ret_type: ?c.LLVMTypeRef,        
+        ret_type: Type,        
     };
 
     pub const ExternFnSymbol = struct {
         span: Span,
         ref_count: *u32,
         name: []const u8,
-        param_type: TypeAnnotation,
-        ret_type: TypeAnnotation,
-        //llvm_param_types: ?[]c.LLVMTypeRef,
-        //llvm_ret_type: ?c.LLVMTypeRef,
+        param_type: Type,
+        ret_type: Type,
     };
 };
 
@@ -134,12 +128,12 @@ pub const AnalyzedNode = union(enum) {
     pub const AnalyzedFuncCall = struct {
         parsed: Stmt,
         symbol: Symbol,
-        ret_type: TypeAnnotation,  
+        ret_type: Type,  
     };
 
     pub const AnalyzedLiteral = struct {
         parsed: Stmt,
-        lit_type: TypeAnnotation,  
+        lit_type: Type,  
     };
 };
 

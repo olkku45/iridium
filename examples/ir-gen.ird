@@ -1,0 +1,7 @@
+fn main() => i32 {
+	let x: i32 = 5 * 2 + 2 / 5 % 3;
+	let y: i32 = 2 / (5 - 21 + (4 - 2)) * 2;
+
+	let z: i32 = x + y;
+	return z;
+}
