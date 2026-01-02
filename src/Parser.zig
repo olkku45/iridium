@@ -248,6 +248,7 @@ pub const Parser = struct {
     pub fn parseTokens(self: *Parser) ![]Stmt {
         while (!isAtEnd(self)) {
             const stmt = try parseStatement(self);
+            std.debug.print("{any}\n", .{stmt});
             if (stmt != null) try self.statements.append(self.alloc, stmt.?)
             else break;
         }
@@ -281,6 +282,7 @@ pub const Parser = struct {
                 return try parseExprStmt(self) orelse return null;
             },
             .RETURN => {
+                std.debug.print("here1\n", .{});
                 return try retStmt(self) orelse return null;
             },
             .WHILE => {
@@ -693,8 +695,10 @@ pub const Parser = struct {
         try advance(self, .RETURN, "expected 'return'") orelse return null;
         
         const ret_value = try parseExpression(self) orelse return null;
-        
-        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+
+        // temporary comment, TODO uncomment this when codegen for naked return works,
+        // not uncommenting will cause issues
+        // try advance(self, .SEMICOLON, "expected ';'") orelse return null;
 
         return Stmt{ .ret_stmt = .{
             .value = ret_value,
