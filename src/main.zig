@@ -24,6 +24,9 @@ pub const Span = struct {
 test {
     print("Tokenizer tests...\n", .{});
     _ = @import("Tokenizer.zig");
+
+    print("Parser tests...\n", .{});
+    _ = @import("Parser.zig");
 }
 
 pub fn main() !void {
@@ -49,7 +52,8 @@ pub fn main() !void {
     //}
 
     var parser = Parser.init(line_tokens, allocator);
-    const ast = try parser.parseTokens();
+    const nullable = try parser.parseTokens();
+    const ast = nullable.?;
 
     // check parsing errors before going to semantic analysis
     const diagnostics = try parser.getDiagnostics();

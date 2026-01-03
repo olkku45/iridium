@@ -409,7 +409,7 @@ pub const Tokenizer = struct {
 const testing = std.testing;
 
 fn expectTokens(source: []const u8, expected: []const Token) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
     const allocator = arena.allocator();
     
     var tokenizer = try Tokenizer.init(allocator, source);
