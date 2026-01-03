@@ -946,7 +946,8 @@ pub const Parser = struct {
             },
             else => {
                 try collectError(self, "expected a literal", try previousToken(self));
-                self.consume();
+                try self.synchronize();
+                return null;
             },
         }
 
@@ -1589,6 +1590,35 @@ test "error recovery: continue after error" {
     
     // should have error
     try testing.expect(result.diagnostics.len > 0);
+}
+
+test "recoverable errors: multiple issues" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    // missing colon & semicolon
+    const result = try parseSource(allocator, "let x i32 = 42");
+    
+    // should report both errors
+    try testing.expect(result.diagnostics.len >= 2);
+    
+    // but still parse further
+    try testing.expectEqual(@as(usize, 1), result.ast.len);
+    try testing.expect(result.ast[0] == .var_decl);
+}
+
+test "fatal error: missing identifier" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let : i32 = 42;");
+    
+    try testing.expect(result.diagnostics.len > 0);
+    
+    // shouldn't create a declaration due to fatal error
+    try testing.expectEqual(@as(usize, 0), result.ast.len);
 }
 
 // ====================================
