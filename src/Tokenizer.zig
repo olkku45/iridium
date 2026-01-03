@@ -95,6 +95,8 @@ pub const TokenType = enum {
     AS,
     TRY,
     PUB,
+
+    EOF,
 };
 
 pub const Token = struct {
@@ -195,6 +197,17 @@ pub const Tokenizer = struct {
             self.start = self.current;
             try getToken(self);
         }
+
+        try self.tokens.append(self.alloc, Token{
+            .token_type = .EOF,
+            .lexeme = "",
+            .span = Span{
+                .line = self.line,
+                .start_col = self.col,
+                .end_col = self.col,
+                .source_file = null,
+            }
+        });
 
         return self.tokens.toOwnedSlice(self.alloc);
     }
@@ -426,10 +439,12 @@ fn expectTokens(source: []const u8, expected: []const Token) !void {
 test "single tokens" {
     try expectTokens("(", &.{
         .{ .token_type = .LEFT_PAREN, .lexeme = "(", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 
     try expectTokens("+", &.{
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
@@ -438,6 +453,7 @@ test "multiple tokens" {
         .{ .token_type = .INTEGER, .lexeme = "42", .span = null },
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
         .{ .token_type = .INTEGER, .lexeme = "1", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
@@ -446,6 +462,7 @@ test "identifiers" {
         .{ .token_type = .IDENTIFIER, .lexeme = "x", .span = null },
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
         .{ .token_type = .IDENTIFIER, .lexeme = "y", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
@@ -455,6 +472,7 @@ test "keywords" {
         .{ .token_type = .STD, .lexeme = "std", .span = null },
         .{ .token_type = .FN, .lexeme = "fn", .span = null },
         .{ .token_type = .EXTERN, .lexeme = "extern", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
