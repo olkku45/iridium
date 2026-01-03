@@ -22,7 +22,8 @@ pub const Span = struct {
 };
 
 test {
-    _ = @import("tests/test-compiler.zig");
+    print("Tokenizer tests...\n", .{});
+    _ = @import("Tokenizer.zig");
 }
 
 pub fn main() !void {
@@ -59,11 +60,11 @@ pub fn main() !void {
                     if (diag.msg == null) {
                         print(
                             "Error at line {d}: after '{s}'\n",
-                            .{diag.token.span.line, diag.token.lexeme}
+                            .{diag.token.span.?.line, diag.token.lexeme}
                         );
                     } else print(
                         "Error at line {d}: {s} after '{s}'\n",
-                        .{diag.token.span.line, diag.msg.?, diag.token.lexeme}
+                        .{diag.token.span.?.line, diag.msg.?, diag.token.lexeme}
                     );
                 },
                 else => {},
