@@ -1,11 +1,11 @@
 const std = @import("std");
-const Tokenizer = @import("Tokenizer.zig");
+const Tokenizer = @import("Tokenizer.zig").Tokenizer;
 const Symbol = @import("Analyzer.zig").Symbol;
 const SymbolTable = @import("Analyzer.zig").SymbolTable;
 const Span = @import("main.zig").Span;
 
-const Token = Tokenizer.Token;
-const TokenType = Tokenizer.TokenType;
+const Token = @import("Tokenizer.zig").Token;
+const TokenType = @import("Tokenizer.zig").TokenType;
 const Category = TokenType.Category;
 
 const print = std.debug.print;
@@ -212,10 +212,14 @@ pub const PrecedenceTable = struct {
             .GREATER, .GREATER_EQUAL, .LESS, .LESS_EQUAL => Precedence.relational,
             .PLUS, .MINUS => Precedence.add_sub,
             .STAR, .SLASH, .MODULUS => Precedence.mul_div_mod,
+            .BANG => Precedence.unary,
             .LEFT_PAREN, .LEFT_BRACKET => Precedence.call_access,
-            else => {
-                return Precedence.none;
-            },  
+
+            .IDENTIFIER,
+            .INTEGER, .FLOAT, .STRING, .CHARACTER,
+            .TRUE, .FALSE, .NULL,
+            => Precedence.primary,
+            else => Precedence.none,  
         };
     }
 
@@ -245,86 +249,72 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseTokens(self: *Parser) ![]Stmt {
+    pub fn parseTokens(self: *Parser) !?[]Stmt {
         while (!isAtEnd(self)) {
             const stmt = try parseStatement(self);
-            std.debug.print("{any}\n", .{stmt});
-            if (stmt != null) try self.statements.append(self.alloc, stmt.?)
-            else break;
+            if (stmt) |s| {
+                try self.statements.append(self.alloc, s);
+            } else {
+                if (isAtEnd(self)) break;
+
+                try collectError(self, "unexpected token", currToken(self));
+                try synchronize(self);
+            }
         }
         
-        const slice = try self.statements.toOwnedSlice(self.alloc);
-        return slice;
+        return try self.statements.toOwnedSlice(self.alloc);
     }
 
     pub fn getDiagnostics(self: *Parser) ![]Diagnostic {
-        const slice = try self.diagnostics.toOwnedSlice(self.alloc);
-        return slice;
+        return try self.diagnostics.toOwnedSlice(self.alloc);
     }
 
     fn parseStatement(self: *Parser) anyerror!?Stmt {
         const curr_token_type = getCurrentTokenType(self);
 
-        switch (curr_token_type) {
-            .EXTERN => {
-                return try externFnDeclaration(self) orelse return null;
-            },
-            .FN => {
-                return try fnDeclaration(self) orelse return null;  
-            },
-            .LET => {
-                return try variableDecl(self) orelse return null;  
-            },
-            .IF => {
-                return try ifStmt(self) orelse return null;
-            },
-            .IDENTIFIER => {
-                return try parseExprStmt(self) orelse return null;
-            },
-            .RETURN => {
-                std.debug.print("here1\n", .{});
-                return try retStmt(self) orelse return null;
-            },
-            .WHILE => {
-                return try whileLoop(self) orelse return null;
-            },
-            else => {},
-        }
-        return null;
+        return switch (curr_token_type) {
+            .EXTERN => try externFnDeclaration(self) orelse return null,
+            .FN => try fnDeclaration(self) orelse return null,
+            .LET => try variableDecl(self) orelse return null,
+            .IF => try ifStmt(self) orelse return null,
+            .RETURN => try retStmt(self) orelse return null,
+            .WHILE => try whileLoop(self) orelse return null,
+            // this does a couple things:
+            // 1. handles all expression types
+            // 2. returns error if not a valid expression
+            else => try parseExprStmt(self) orelse return null,
+        };
     }
 
     fn parseBlock(self: *Parser) !?[]Stmt {
         var stmt_list: std.array_list.Aligned(Stmt, null) = .empty;
 
-        try advance(self, .LEFT_BRACE, "expected '{'") orelse return null;
+        if (!try self.expect(.LEFT_BRACE, "expected '{'")) {
+            return null;
+        }
 
-        while (getCurrentTokenType(self) != .RIGHT_BRACE) {
-            if (isAtEnd(self)) {
-                try collectError(self, "unexpected end of file", currToken(self));
-
-                const slice = try stmt_list.toOwnedSlice(self.alloc);
-                return slice;
+        while (!isAtEnd(self) and getCurrentTokenType(self) != .RIGHT_BRACE) {
+            if (try parseStatement(self)) |stmt| {
+                try stmt_list.append(self.alloc, stmt);
             }
-            const stmt = try parseStatement(self);
-            if (stmt != null) try stmt_list.append(self.alloc, stmt.?);
         }
 
-        if (!isAtEnd(self)) {
-            try advance(self, .RIGHT_BRACE, "expected '}'") orelse return null;
-        }
+        _ = try self.expect(.RIGHT_BRACE, "expected '}'");
 
-        const slice = try stmt_list.toOwnedSlice(self.alloc);
-        return slice;
+        return try stmt_list.toOwnedSlice(self.alloc);
     }
 
     fn parseExprStmt(self: *Parser) !?Stmt {
         const expr = try parseExpression(self) orelse return null;
-        try advance(self, .SEMICOLON, "#59183 expected ';'") orelse return null;
+
+        _ = try self.expect(.SEMICOLON, "expected ';'");
+        
         return Stmt{ .expr_stmt = .{ .expr = expr } };
     }
 
     // === PRATT PARSER ===
-    
+
+    // TODO remove this unnececssary intermediary function
     fn parseExpression(self: *Parser) !?Expr {
         return try parseExpressionWithPrecedence(self, PrecedenceTable.Precedence.none) orelse return null;
     }
@@ -359,38 +349,38 @@ pub const Parser = struct {
                 
                 switch (curr.token_type) {
                     .INTEGER => {
-                        try advance(self, .INTEGER, "expected an int") orelse return null;
+                        self.consume();
                         lit_type = .int;
                     },
                     .CHARACTER => {
-                        try advance(self, .CHARACTER, "expected a char") orelse return null;
+                        self.consume();
                         lit_type = .char;
                     },
                     .FLOAT => {
-                        try advance(self, .FLOAT, "expected a float") orelse return null;
+                        self.consume();
                         lit_type = .float;
                     },
                     .STRING => {
-                        try advance(self, .STRING, "expected a string") orelse return null;
+                        self.consume();
                         lit_type = .string;
                     },
                     .TRUE => {
-                        try advance(self, .TRUE, "expected a boolean") orelse return null;
+                        self.consume();
                         lit_type = .boolean;
                     },
                     .FALSE => {
-                        try advance(self, .FALSE, "expected a boolean") orelse return null;
+                        self.consume();
                         lit_type = .boolean;
                     },
                     .NULL => {
-                        try advance(self, .NULL, "expected null") orelse return null;
+                        self.consume();
                         lit_type = .null;
                     },
                     else => {},
                 }
                 
                 const expr = Expr{ .literal = .{
-                    .span = curr.span,
+                    .span = curr.span.?,
                     .value = curr.lexeme,
                     .type = lit_type,
                 }};
@@ -398,18 +388,22 @@ pub const Parser = struct {
             },
             .IDENTIFIER => {
                 const expr = Expr{ .literal = .{
-                    .span = curr.span,
+                    .span = curr.span.?,
                     .type = .identifier,
                     .value = curr.lexeme,
                 }};
-                try advance(self, .IDENTIFIER, "expected identifier") orelse return null;
+                self.consume();
                 return expr;
             },
             // grouping
             .LEFT_PAREN => {
-                try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
+                self.consume();
+
                 const inner = try parseExpression(self) orelse return null;
-                try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+                if (!try self.expect(.RIGHT_PAREN, "expected ')'")) {
+                    try self.synchronize();
+                    return null;
+                }
 
                 const expr = try self.alloc.create(Expr);
                 expr.* = inner;
@@ -419,9 +413,9 @@ pub const Parser = struct {
             .MINUS, .BANG => {
                 const op: UnaryOp = if (curr.token_type == .MINUS) .NEG else .NOT;
                 if (curr.token_type == .MINUS) {
-                    try advance(self, .MINUS, "expected '-'") orelse return null;
+                    self.consume();
                 } else {
-                    try advance(self, .BANG, "expected '!'") orelse return null;
+                    self.consume();
                 }
                 const operand = try self.parseExpressionWithPrecedence(PrecedenceTable.Precedence.unary) orelse return null;
                                
@@ -462,55 +456,55 @@ pub const Parser = struct {
                 var bin_op: BinaryOp = undefined;
                 switch (op.token_type) {
                     .PLUS => {
-                        try advance(self, .PLUS, "expected '+'") orelse return null;
+                        self.consume();
                         bin_op = .ADD;
                     },
                     .MINUS => {
-                        try advance(self, .MINUS, "expected '-'") orelse return null;
+                        self.consume();
                         bin_op = .SUB;
                     },
                     .STAR => {
-                        try advance(self, .STAR, "expected '*'") orelse return null;
+                        self.consume();
                         bin_op = .MUL;
                     },
                     .SLASH => {
-                        try advance(self, .SLASH, "expected '/'") orelse return null;
+                        self.consume();
                         bin_op = .DIV;
                     },
                     .MODULUS => {
-                        try advance(self, .MODULUS, "expected '%'") orelse return null;
+                        self.consume();
                         bin_op = .MODULUS;
                     },
                     .GREATER => {
-                        try advance(self, .GREATER, "expected '>'") orelse return null;
+                        self.consume();
                         bin_op = .GREATER;
                     },
                     .LESS => {
-                        try advance(self, .LESS, "expected '<'") orelse return null;
+                        self.consume();
                         bin_op = .LESS;
                     },
                     .GREATER_EQUAL => {
-                        try advance(self, .GREATER_EQUAL, "expected '>='") orelse return null;
+                        self.consume();
                         bin_op = .GREATER_EQUAL;
                     },
                     .LESS_EQUAL => {
-                        try advance(self, .LESS_EQUAL, "expected '<='") orelse return null;
+                        self.consume();
                         bin_op = .LESS_EQUAL;
                     },
                     .AND => {
-                        try advance(self, .AND, "expected 'and'") orelse return null;
+                        self.consume();
                         bin_op = .AND;
                     },
                     .OR => {
-                        try advance(self, .OR, "expected 'or'") orelse return null;
+                        self.consume();
                         bin_op = .OR;
                     },
                     .EQUAL_EQUAL => {
-                        try advance(self, .EQUAL_EQUAL, "expected '=='") orelse return null;
+                        self.consume();
                         bin_op = .EQUAL_EQUAL;
                     },
                     .BANG_EQUAL => {
-                        try advance(self, .BANG_EQUAL, "expected '!='") orelse return null;
+                        self.consume();
                         bin_op = .NOT_EQUAL;
                     },
                     else => {},
@@ -527,7 +521,7 @@ pub const Parser = struct {
             },
             // assignment
             .EQUAL => {
-                try advance(self, .EQUAL, "expected '='") orelse return null;
+                self.consume();
                 const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
                 const bin_op: BinaryOp = .EQUAL;
     
@@ -544,7 +538,7 @@ pub const Parser = struct {
             .LEFT_PAREN => {
                 var args: std.array_list.Aligned(Expr, null) = .empty;
 
-                try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
+                self.consume();
 
                 if (currToken(self).token_type != .RIGHT_PAREN) {
                     while (true) {
@@ -553,7 +547,7 @@ pub const Parser = struct {
                     }
                 }
 
-                try advance(self, .RIGHT_PAREN, "expected ')' after arguments") orelse return null;
+                _ = try self.expect(.RIGHT_PAREN, "expected ')' after function arguments");
 
                 const expr = try self.alloc.create(Expr.CallExpr);
                 expr.* = .{
@@ -566,7 +560,8 @@ pub const Parser = struct {
             // TODO array indexing & member access?
 
             .PLUS_EQUAL => {
-                try advance(self, .PLUS_EQUAL, "excepted '+='") orelse return null;
+                self.consume();
+
                 const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
                 const bin_op: BinaryOp = .ADD_EQUAL;
 
@@ -580,7 +575,8 @@ pub const Parser = struct {
                 return Expr{ .binary = expr };
             },
             .MINUS_EQUAL => {
-                try advance(self, .MINUS_EQUAL, "expected -=") orelse return null;
+                self.consume();
+                
                 const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
                 const bin_op: BinaryOp = .SUB_EQUAL;
 
@@ -594,7 +590,8 @@ pub const Parser = struct {
                 return Expr{ .binary = expr };
             },
             .STAR_EQUAL => {
-                try advance(self, .STAR_EQUAL, "expected '*='") orelse return null;
+                self.consume();
+                
                 const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
                 const bin_op: BinaryOp = .MUL_EQUAL;
 
@@ -608,7 +605,8 @@ pub const Parser = struct {
                 return Expr{ .binary = expr };
             },
             .SLASH_EQUAL => {
-                try advance(self, .SLASH_EQUAL, "expected '/='") orelse return null;
+                self.consume();
+                
                 const right = try self.parseExpressionWithPrecedence(prec) orelse return null;
                 const bin_op: BinaryOp = .DIV_EQUAL;
 
@@ -629,14 +627,25 @@ pub const Parser = struct {
     }
 
     fn whileLoop(self: *Parser) !?Stmt {
-       try advance(self, .WHILE, null) orelse return null;
-       try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
+       if (!try self.expect(.WHILE, "expected 'while'")) {
+           return null;
+       }
+
+       _ = try self.expect(.LEFT_PAREN, "expected '(' after 'while'");
        
-       const cond = try parseExpression(self) orelse return null;
+       const cond = try parseExpression(self) orelse {
+           try self.collectError("expected condition", currToken(self));
+           try self.synchronize();
+           return null;
+       };
 
-       try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
+       _ = try self.expect(.RIGHT_PAREN, "expected ')'");
 
-       const body = try parseBlock(self) orelse return null;
+       const body = try parseBlock(self) orelse {
+           try self.collectError("expected block, denoted by '{}'", currToken(self));
+           try self.synchronize();
+           return null;
+       };
 
        return Stmt{ .while_loop = .{
            .cond = cond,
@@ -645,24 +654,41 @@ pub const Parser = struct {
     }
 
     fn fnDeclaration(self: *Parser) !?Stmt {
-        try advance(self, .FN, null) orelse return null;
+        if (!try self.expect(.FN, "expected 'fn'")) {
+            return null;
+        }
 
         const func_name = Expr{ .literal = .{
             .type = .string,
-            .span = currToken(self).span,
+            .span = currToken(self).span.?,
             .value = currToken(self).lexeme,
         }};
-        try advance(self, .IDENTIFIER, null) orelse return null;
 
-        try advance(self, .LEFT_PAREN, "expected '(' after function name") orelse return null;
+        if (!try self.expect(.IDENTIFIER, "expected function name")) {
+            return null;
+        }
 
+        if (!try self.expect(.LEFT_PAREN, "expected '(' after function name")) {
+            try self.synchronize();
+            return null;
+        }
+    
         // no params yet
 
-        try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
-        try advance(self, .RIGHT_ARROW, "expected '=>'") orelse return null;
+        _ = try self.expect(.RIGHT_PAREN, "expected ')' after parameters");
+        _ = try self.expect(.RIGHT_ARROW, "expected '=>' to signify type information");
 
-        const ret_type = try parseType(self) orelse return null;
-        const func_body = try parseBlock(self) orelse return null;
+        const ret_type = try parseType(self) orelse {
+            try self.collectError("expected return type marker", currToken(self));
+            try self.synchronize();
+            return null;
+        };
+
+        const func_body = try parseBlock(self) orelse {
+            try self.collectError("expected function body", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
         // TODO: loop over stmts to see if there's a return stmt,
         // if not return error except if ret type is void, or some other way to check for a
@@ -676,14 +702,25 @@ pub const Parser = struct {
     }
 
     fn ifStmt(self: *Parser) !?Stmt {
-        try advance(self, .IF, "expected 'if'") orelse return null;
-        try advance(self, .LEFT_PAREN, "expected '(' after if") orelse return null;
+        if (!try self.expect(.IF, "expected 'if'")) {
+            return null;
+        }
+
+        _ = try self.expect(.LEFT_PAREN, "expected '(' after 'if'");
         
-        const cond = try parseExpression(self) orelse return null;
+        const cond = try parseExpression(self) orelse {
+            try self.collectError("expected condition", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
-        try advance(self, .RIGHT_PAREN, "expected ')' after condition") orelse return null;
+        _ = try self.expect(.RIGHT_PAREN, "expected ')' after condition");
 
-        const if_body = try parseBlock(self) orelse return null;
+        const if_body = try parseBlock(self) orelse {
+            try self.collectError("expected block after 'if' condition", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
         return Stmt{ .if_stmt = .{
             .condition = cond,
@@ -692,70 +729,114 @@ pub const Parser = struct {
     }
     
     fn retStmt(self: *Parser) !?Stmt {
-        try advance(self, .RETURN, "expected 'return'") orelse return null;
+        if (!try self.expect(.RETURN, "expected 'return'")) {
+            return null;
+        }
         
-        const ret_value = try parseExpression(self) orelse return null;
+        const ret_value = try parseExpression(self) orelse {
+            try self.collectError("expected return value", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
-        // temporary comment, TODO uncomment this when codegen for naked return works,
-        // not uncommenting will cause issues
-        // try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+        _ = try self.expect(.SEMICOLON, "expected ';'");
 
         return Stmt{ .ret_stmt = .{
             .value = ret_value,
         }};
     }
 
-    // TODO: variable declaration without the value
+    // TODO: variable declaration without the value, like 'let x: i32;'
     fn variableDecl(self: *Parser) !?Stmt {
-        var mutable = false;
-
-        try advance(self, .LET, null) orelse return null;
-        
-        if (getCurrentTokenType(self) == .MUT) {
-            mutable = true;
-            try advance(self, .MUT, null) orelse return null;
+        if (!try self.expect(.LET, "expected 'let'")) {
+            return null;
         }
 
-        const var_name = try parseLiteral(self) orelse return null;
+        var mutable = false;
+        if (getCurrentTokenType(self) == .MUT) {
+            mutable = true;
+            self.consume();
+        }
+
+        const var_name = try parseLiteral(self) orelse {
+            try self.collectError("expected variable name", currToken(self));
+            try self.synchronize();
+            return null;
+        };
         
-        try advance(self, .COLON, "expected ':'") orelse return null;
-        
-        const var_type = try parseType(self) orelse return null;
+        _ = try self.expect(.COLON, "expected ':'");
 
-        try advance(self, .EQUAL, "expected '='") orelse return null;
+        // TODO: type inference!
+        const var_type = try parseType(self) orelse {
+            try self.collectError("expected type annotation", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
-        const value = try parseExpression(self) orelse return null;
+        _ = try self.expect(.EQUAL, "expected '='");
 
-        std.debug.print("gggg\n", .{});
+        const value = try parseExpression(self) orelse {
+            try self.collectError("expected variable initialization", currToken(self));
+            try self.synchronize();
+            return null;
+        };
 
-        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
-
-        return Stmt{ .var_decl = .{
+        const stmt = Stmt{ .var_decl = .{
             .mutable = mutable,
             .name = Expr{ .literal = var_name.literal },
             .value = value,
             .var_type = var_type,
         }};
+
+        _ = try self.expect(.SEMICOLON, "expected ';'");
+
+        return stmt;
     }
 
     fn externFnDeclaration(self: *Parser) !?Stmt {
-        try advance(self, .EXTERN, null) orelse return null;
-        try advance(self, .FN, "expected 'fn'") orelse return null;
+        if (!try self.expect(.EXTERN, "expected 'extern'")) {
+            return null;
+        }
+    
+        if (!try self.expect(.FN, "expected 'fn'")) {
+            return null;
+        }
 
-        const name = try parseLiteral(self) orelse return null;
+        const name = try parseLiteral(self) orelse {
+            try self.collectError("expected function name", currToken(self));
+            try self.synchronize();
+            return null;
+        };
         
-        try advance(self, .LEFT_PAREN, "expected '('") orelse return null;
-        try advance(self, .IDENTIFIER, null) orelse return null;
-        try advance(self, .COLON, "expected ':'") orelse return null;
-
-        const arg_type = try parseType(self) orelse return null;
+        _ = try self.expect(.LEFT_PAREN, "expected '('");
         
-        try advance(self, .RIGHT_PAREN, "expected ')'") orelse return null;
-        try advance(self, .RIGHT_ARROW, "expected '=>'") orelse return null;
+        if (!try self.expect(.IDENTIFIER, "expected identifier")) {
+            try self.synchronize();
+            return null;
+        }
 
-        const ret_type = try parseType(self) orelse return null;
+        _ = try self.expect(.COLON, "expected ':'");
 
-        try advance(self, .SEMICOLON, "expected ';'") orelse return null;
+        const arg_type = try parseType(self) orelse {
+            try self.collectError("expected argument type", currToken(self));
+            try self.synchronize();
+            return null;
+        };
+
+        _ = try self.expect(.RIGHT_PAREN, "expected ')'");
+
+        if (!try self.expect(.RIGHT_ARROW, "expected '=>'")) {
+            try self.synchronize();
+            return null;
+        }
+
+        const ret_type = try parseType(self) orelse {
+            try self.collectError("expected return type", currToken(self));
+            try self.synchronize();
+            return null;
+        };
+
+        _ = try self.expect(.SEMICOLON, "expected ';'");
 
         return Stmt{ .extern_fn_decl = .{
             .name = name,
@@ -764,141 +845,67 @@ pub const Parser = struct {
         }};
     }
 
-    fn parseBinOperator(self: *Parser) !?BinaryOp {
-        const op = currToken(self);
-        const m = "expected operator";
-
-        switch (op.token_type) {
-            .PLUS => {
-                try advance(self, .PLUS, m) orelse return null;
-                return .ADD;   
-            },
-            .MINUS => {
-                try advance(self, .MINUS, m) orelse return null;
-                return .SUB;
-            },
-            .STAR => {
-                try advance(self, .STAR, m) orelse return null;
-                return .MUL;
-            },
-            .SLASH => {
-                try advance(self, .SLASH, m) orelse return null;
-                return .DIV;  
-            },
-            .GREATER => {
-                try advance(self, .GREATER, m) orelse return null;
-                return .GREATER;
-            },
-            .LESS => {
-                try advance(self, .LESS, m) orelse return null;
-                return .LESS;
-            },
-            .EQUAL => {
-                try advance(self, .EQUAL, m) orelse return null;
-                return .EQUAL;
-            },
-            .BANG_EQUAL => {
-                try advance(self, .BANG_EQUAL, m) orelse return null;
-                return .NOT_EQUAL;
-            },
-            .EQUAL_EQUAL => {
-                try advance(self, .EQUAL_EQUAL, m) orelse return null;
-                return .EQUAL_EQUAL;
-            },
-            .LESS_EQUAL => {
-                try advance(self, .LESS_EQUAL, m) orelse return null;
-                return .LESS_EQUAL;
-            },
-            .GREATER_EQUAL => {
-                try advance(self, .GREATER_EQUAL, m) orelse return null;
-                return .GREATER_EQUAL;
-            },
-            .PLUS_EQUAL => {
-                try advance(self, .PLUS_EQUAL, m) orelse return null;
-                return .ADD_EQUAL;
-            },
-            .MINUS_EQUAL => {
-                try advance(self, .MINUS_EQUAL, m) orelse return null;
-                return .SUB_EQUAL;
-            },
-            .STAR_EQUAL => {
-                try advance(self, .STAR_EQUAL, m) orelse return null;
-                return .MUL_EQUAL;
-            },
-            .SLASH_EQUAL => {
-                try advance(self, .SLASH_EQUAL, m) orelse return null;
-                return .DIV_EQUAL;
-            },
-            else => {
-                try collectError(self, "expected an operator", try previousToken(self));
-                advanceSync(self) orelse return null;
-            },
-        }
-        return null;
-    }
-
     fn parseType(self: *Parser) !?Type {
         const curr = currToken(self);
-        const m = "expected a type";
 
         switch (curr.token_type) {
             .C_INT => {
-                try advance(self, .C_INT, m) orelse return null;
+                self.consume();
                 return .C_INT;
             },
             .UINT8 => {
-                try advance(self, .UINT8, m) orelse return null;
+                self.consume();
                 return .UINT8;
             },
             .UINT16 => {
-                try advance(self, .UINT16, m) orelse return null;
+                self.consume();
                 return .UINT16;
             },
             .UINT32 => {
-                try advance(self, .UINT32, m) orelse return null;
+                self.consume();
                 return .UINT32;  
             },
             .UINT64 => {
-                try advance(self, .UINT64, m) orelse return null;
+                self.consume();
                 return .UINT64;  
             },
             .INT8 => {
-                try advance(self, .INT8, m) orelse return null;
+                self.consume();
                 return .INT8;  
             },
             .INT16 => {
-                try advance(self, .INT16, m) orelse return null;
+                self.consume();
                 return .INT16;  
             },
             .INT32 => {
-                try advance(self, .INT32, m) orelse return null;
+                self.consume();
                 return .INT32;  
             },
             .INT64 => {
-                try advance(self, .INT64, m) orelse return null;
+                self.consume();
                 return .INT64;
             },
             .FLOAT32 => {
-                try advance(self, .FLOAT32, m) orelse return null;
+                self.consume();
                 return .FLOAT32;  
             },
             .FLOAT64 => {
-                try advance(self, .FLOAT64, m) orelse return null;
+                self.consume();
                 return .FLOAT64;  
             },
             .BOOL => {
-                try advance(self, .BOOL, m) orelse return null;
+                self.consume();
                 return .BOOL;  
             },
             .VOID => {
-                try advance(self, .VOID, m) orelse return null;
+                self.consume();
                 return .VOID;
             },
             else => {
                 // TODO see if taking previous token causes further issues, currently
                 // it fixes some related to wrong error msgs
                 try collectError(self, "expected a type", try previousToken(self));
-                try synchronize(self) orelse return null;
+                try synchronize(self);
             },
         }
         return null;
@@ -911,78 +918,75 @@ pub const Parser = struct {
         switch (curr.token_type) {
             .IDENTIFIER => {
                 lit_type = .identifier;
-                try advance(self, .IDENTIFIER, "expected an identifier") orelse return null;
+                self.consume();
             },
             .INTEGER => {
                 lit_type = .int;
-                try advance(self, .INTEGER, "expected an integer") orelse return null;
+                self.consume();
             },
             .FLOAT => {
                 lit_type = .float;
-                try advance(self, .FLOAT, "expected a float") orelse return null; 
+                self.consume();
             },
             .TRUE => {
                 lit_type = .boolean;
-                try advance(self, .TRUE, "expected a boolean") orelse return null;
+                self.consume();
             },
             .FALSE => {
                 lit_type = .boolean;
-                try advance(self, .FALSE, "expected a boolean") orelse return null;  
+                self.consume();  
             },
             .STRING => {
                 lit_type = .string;
-                try advance(self, .STRING, "expected a string") orelse return null;  
+                self.consume();  
             },
             .CHARACTER => {
                 lit_type = .int;
-                try advance(self, .CHARACTER, "expected a character") orelse return null;  
+                self.consume();  
             },
             else => {
                 try collectError(self, "expected a literal", try previousToken(self));
-                advanceSync(self) orelse return null;
+                try self.synchronize();
+                return null;
             },
         }
 
         const lit = Expr{ .literal = .{
-            .span = curr.span,
+            .span = curr.span.?,
             .value = curr.lexeme,
             .type = lit_type,
         }};
 
         return lit;
     }
-    
-    fn advance(self: *Parser, token_type: TokenType, msg: ?[]const u8) !?void {
-        // this is just for debugging compiler
-        if (indexFault(self)) {
-            return ParseError.IndexFault;
-        }
-        if (isAtEnd(self)) {
-            // TODO: move these error collects from end of file somewhere else, where
-            // they don't collect an error from a correct end of file
-            //try collectError(self, "unexpected end of file", currToken(self).span);
-            return null;
+
+    // conditional advance
+    fn expect(self: *Parser, token_type: TokenType, msg: []const u8) !bool {
+        if (self.current >= self.tokens.len) {
+            try self.collectError(msg, self.tokens[self.tokens.len - 1]);
+            return false;
         }
         if (getCurrentTokenType(self) != token_type) {
-            try collectError(self, msg, try previousToken(self));
-            try synchronize(self) orelse return null;
-            return null;
+            try self.collectError(msg, currToken(self));
+            return false;
         }
         self.current += 1;
+        return true;
     }
 
-    fn advanceSync(self: *Parser) ?void {
-        if (isAtEnd(self)) {
-            // TODO: see the todo in advance()
-            //try collectError(self, "unexpected end of file", currToken(self).span);
-            return null;
+    // unconditional advance
+    fn consume(self: *Parser) void {
+        if (self.current < self.tokens.len) {
+            self.current += 1;
         }
-        self.current += 1;
     }
 
     fn match(self: *Parser, token_type: TokenType) !?bool {
         if (currToken(self).token_type == token_type) {
-            try advance(self, token_type, null) orelse return null;
+            if (!try self.expect(token_type, "undefined message")) {
+                try self.synchronize();
+                return null;
+            }
             return true;
         }
         return false;
@@ -1013,7 +1017,7 @@ pub const Parser = struct {
     }
 
     fn isAtEnd(self: *Parser) bool {
-        return self.current == self.tokens.len - 1;
+        return self.tokens[self.current].token_type == .EOF;
     }
 
     fn isAtStart(self: *Parser) bool {
@@ -1025,31 +1029,24 @@ pub const Parser = struct {
     }
 
     // find a 'safe' token
-    fn synchronize(self: *Parser) anyerror!?void {
+    fn synchronize(self: *Parser) anyerror!void {
         while (!isAtEnd(self)) {
             if (getCurrentTokenType(self) == .SEMICOLON) {
-                try advance(self, .SEMICOLON, null) orelse return null;
+                self.consume();
                 return;
             }
             
             switch (getCurrentTokenType(self)) {
-                .FN => return,
-                .FOR => return,
-                .WHILE => return,
-                .IF => return,
-                .RETURN => return,
-                .LET => return,
-                .EXTERN => return,
+                .FN, .FOR, .WHILE, .IF, .RETURN, .LET, .EXTERN => return,
                 // etc...
                 else => {},
             }
-            // can only happen at the end of a file
-            if (advanceSync(self) == null) return null;
+            self.consume();
         }
     }
 
     fn reportParseError(token: Token) void {
-        print("Error at {d}:{d} : {s}, {any} | ", .{token.span.line, token.span.start_col, token.lexeme, token.token_type});
+        print("Error at {d}:{d} : {s}, {any} | ", .{token.span.?.line, token.span.?.start_col, token.lexeme, token.token_type});
     }
 
     fn collectError(self: *Parser, err_msg: ?[]const u8, token: Token) !void {
@@ -1061,3 +1058,599 @@ pub const Parser = struct {
         try self.diagnostics.append(self.alloc, diag);
     }
 };
+
+//  ====================================
+//  TESTS
+//  ====================================
+
+const testing = std.testing;
+const errors = error{
+    UnexpectedParseErrors,
+    ExpectedErrorNotFound,
+};
+
+fn parseSource(allocator: std.mem.Allocator, source: []const u8) !struct {
+    ast: []Stmt,
+    diagnostics: []Diagnostic,
+} {
+    var tokenizer = try Tokenizer.init(allocator, source);
+    const tokens = try tokenizer.getTokens();
+
+    var parser = Parser.init(tokens, allocator);
+    const ast = try parser.parseTokens();
+    const diagnostics = try parser.getDiagnostics();
+
+    return .{ .ast = ast.?, .diagnostics = diagnostics };
+}
+
+fn expectNoErrors(diagnostics: []Diagnostic) !void {
+    if (diagnostics.len > 0) {
+        std.debug.print("\nUnexpected parse errors:\n", .{});
+        for (diagnostics) |diag| {
+            std.debug.print("  Line {any}: {s}\n", .{
+                diag.token.span.?.line,
+                diag.msg orelse "unknown error",
+            });
+        }
+        return error.UnexpectedParseErrors;
+    }
+}
+
+fn expectError(diagnostics: []Diagnostic, exp_msg: []const u8) !void {
+    for (diagnostics) |diag| {
+        if (diag.msg) |msg| {
+            if (std.mem.indexOf(u8, msg, exp_msg) != null) {
+                return;
+            }
+        }
+    }
+    std.debug.print("\nExpected error containing: {s}\n", .{exp_msg});
+    std.debug.print("But got diagnostics:\n", .{});
+    for (diagnostics) |diag| {
+        std.debug.print("  {s}\n", .{diag.msg orelse "no message"});
+    }
+    return error.ExpectedErrorNotFound;
+}
+
+// ====================================
+// EXPRESSION TESTS
+// ====================================
+
+test "parse integer literal" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const result = try parseSource(allocator, "42;");
+    try expectNoErrors(result.diagnostics);
+
+    try testing.expectEqual(@as(usize, 1), result.ast.len);
+    try testing.expect(result.ast[0] == .expr_stmt);
+
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .literal);
+    try testing.expectEqualStrings("42", expr.literal.value);
+    try testing.expectEqual(LiteralType.int, expr.literal.type);
+}
+
+test "parse string literal" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const result = try parseSource(allocator, "\"hello world\";");
+    try expectNoErrors(result.diagnostics);
+
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .literal);
+    try testing.expectEqualStrings("hello world", expr.literal.value);
+    try testing.expectEqual(LiteralType.string, expr.literal.type);
+}
+
+test "parse boolean literals" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    {
+        const result = try parseSource(allocator, "true;");
+        try expectNoErrors(result.diagnostics);
+        const expr = result.ast[0].expr_stmt.expr;
+        try testing.expectEqual(LiteralType.boolean, expr.literal.type);
+        try testing.expectEqualStrings("true", expr.literal.value);
+    }
+
+    {
+        const result = try parseSource(allocator, "false;");
+        try expectNoErrors(result.diagnostics);
+        const expr = result.ast[0].expr_stmt.expr;
+        try testing.expectEqual(LiteralType.boolean, expr.literal.type);
+        try testing.expectEqualStrings("false", expr.literal.value);
+    }
+}
+
+test "parse binary expression: all operators" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const test_cases = [_]struct { source: []const u8, op: BinaryOp }{
+        .{ .source = "1 + 2;", .op = .ADD },
+        .{ .source = "1 - 2;", .op = .SUB },
+        .{ .source = "1 * 2;", .op = .MUL },
+        .{ .source = "1 / 2;", .op = .DIV },
+        .{ .source = "1 % 2;", .op = .MODULUS },
+        .{ .source = "1 == 2;", .op = .EQUAL_EQUAL },
+        .{ .source = "1 != 2;", .op = .NOT_EQUAL },
+        .{ .source = "1 < 2;", .op = .LESS },
+        .{ .source = "1 <= 2;", .op = .LESS_EQUAL },
+        .{ .source = "1 > 2;", .op = .GREATER },
+        .{ .source = "1 >= 2;", .op = .GREATER_EQUAL },
+    };
+
+    for (test_cases) |tc| {
+        const result = try parseSource(allocator, tc.source);
+        try expectNoErrors(result.diagnostics);
+
+        const expr = result.ast[0].expr_stmt.expr;
+        try testing.expect(expr == .binary);
+        try testing.expectEqual(tc.op, expr.binary.op);
+    }
+}
+
+test "parse operator precedence: multiplication before addition" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "1 + 2 * 3;");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .binary);
+    try testing.expectEqual(BinaryOp.ADD, expr.binary.op);
+
+    // left = 1
+    try testing.expect(expr.binary.left == .literal);
+    try testing.expectEqualStrings("1", expr.binary.left.literal.value);
+
+    // right = 2 * 3
+    try testing.expect(expr.binary.right == .binary);
+    try testing.expectEqual(BinaryOp.MUL, expr.binary.right.binary.op);
+    try testing.expectEqualStrings("2", expr.binary.right.binary.left.literal.value);
+    try testing.expectEqualStrings("3", expr.binary.right.binary.right.literal.value);
+}
+
+test "parse operator precedence: parentheses override" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "(1 + 2) * 3;");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .binary);
+    try testing.expectEqual(BinaryOp.MUL, expr.binary.op);
+
+    // left = grouping: (1 + 2)
+    try testing.expect(expr.binary.left == .grouping);
+    const grouped = expr.binary.left.grouping.*;
+    try testing.expect(grouped == .binary);
+    try testing.expectEqual(BinaryOp.ADD, grouped.binary.op);
+
+    // right = 3
+    try testing.expect(expr.binary.right == .literal);
+    try testing.expectEqualStrings("3", expr.binary.right.literal.value);
+}
+
+test "parse unary expression: negation" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "-42;");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .unary);
+    try testing.expectEqual(UnaryOp.NEG, expr.unary.op);
+    
+    try testing.expect(expr.unary.operand == .literal);
+    try testing.expectEqualStrings("42", expr.unary.operand.literal.value);
+}
+
+test "parse unary expression: logical not" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "!true;");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .unary);
+    try testing.expectEqual(UnaryOp.NOT, expr.unary.op);
+}
+
+test "parse function call: no arguments" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "foo();");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .func_call);
+    try testing.expectEqual(@as(usize, 0), expr.func_call.args.len);
+    
+    try testing.expect(expr.func_call.func_name == .literal);
+    try testing.expectEqualStrings("foo", expr.func_call.func_name.literal.value);
+}
+
+test "parse function call: single argument" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "foo(42);");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .func_call);
+    try testing.expectEqual(@as(usize, 1), expr.func_call.args.len);
+    
+    try testing.expect(expr.func_call.args[0] == .literal);
+    try testing.expectEqualStrings("42", expr.func_call.args[0].literal.value);
+}
+
+test "parse function call: multiple arguments" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "foo(1, 2, 3);");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .func_call);
+    try testing.expectEqual(@as(usize, 3), expr.func_call.args.len);
+    
+    try testing.expectEqualStrings("1", expr.func_call.args[0].literal.value);
+    try testing.expectEqualStrings("2", expr.func_call.args[1].literal.value);
+    try testing.expectEqualStrings("3", expr.func_call.args[2].literal.value);
+}
+
+test "parse assignment" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "x = 42;");
+    try expectNoErrors(result.diagnostics);
+    
+    const expr = result.ast[0].expr_stmt.expr;
+    try testing.expect(expr == .binary);
+    try testing.expectEqual(BinaryOp.EQUAL, expr.binary.op);
+    
+    try testing.expectEqualStrings("x", expr.binary.left.literal.value);
+    try testing.expectEqualStrings("42", expr.binary.right.literal.value);
+}
+
+test "parse compound assignment operators" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const test_cases = [_]struct { source: []const u8, op: BinaryOp }{
+        .{ .source = "x += 1;", .op = .ADD_EQUAL },
+        .{ .source = "x -= 1;", .op = .SUB_EQUAL },
+        .{ .source = "x *= 2;", .op = .MUL_EQUAL },
+        .{ .source = "x /= 2;", .op = .DIV_EQUAL },
+    };
+    
+    for (test_cases) |tc| {
+        const result = try parseSource(allocator, tc.source);
+        try expectNoErrors(result.diagnostics);
+        
+        const expr = result.ast[0].expr_stmt.expr;
+        try testing.expect(expr == .binary);
+        try testing.expectEqual(tc.op, expr.binary.op);
+    }
+}
+
+// ====================================
+// STATEMENT TESTS
+// ====================================
+
+test "parse variable declaration: immutable" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let x: i32 = 42;");
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expectEqual(@as(usize, 1), result.ast.len);
+    try testing.expect(result.ast[0] == .var_decl);
+    
+    const decl = result.ast[0].var_decl;
+    try testing.expectEqual(false, decl.mutable);
+    try testing.expectEqualStrings("x", decl.name.literal.value);
+    try testing.expectEqualStrings("42", decl.value.literal.value);
+}
+
+test "parse variable declaration: mutable" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let mut x: i32 = 42;");
+    try expectNoErrors(result.diagnostics);
+    
+    const decl = result.ast[0].var_decl;
+    try testing.expectEqual(true, decl.mutable);
+}
+
+test "parse function declaration: void return" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\fn main() => void {
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expect(result.ast[0] == .fn_decl);
+    const decl = result.ast[0].fn_decl;
+    try testing.expectEqualStrings("main", decl.name.literal.value);
+    try testing.expectEqual(@as(usize, 0), decl.fn_body.len);
+}
+
+test "parse function declaration: with body" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\fn test() => i32 {
+        \\    return 42;
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    const decl = result.ast[0].fn_decl;
+    try testing.expectEqual(@as(usize, 1), decl.fn_body.len);
+    try testing.expect(decl.fn_body[0] == .ret_stmt);
+}
+
+test "parse extern function declaration" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "extern fn putchar(c: c_int) => c_int;");
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expect(result.ast[0] == .extern_fn_decl);
+    const decl = result.ast[0].extern_fn_decl;
+    try testing.expectEqualStrings("putchar", decl.name.literal.value);
+}
+
+test "parse if statement" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\if (true) {
+        \\    x = 1;
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expect(result.ast[0] == .if_stmt);
+    const stmt = result.ast[0].if_stmt;
+    
+    try testing.expect(stmt.condition == .literal);
+    try testing.expectEqual(@as(usize, 1), stmt.if_body.len);
+}
+
+test "parse while loop" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\while (x < 10) {
+        \\    x = x + 1;
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expect(result.ast[0] == .while_loop);
+    const loop = result.ast[0].while_loop;
+    
+    try testing.expect(loop.cond == .binary);
+    try testing.expectEqual(@as(usize, 1), loop.body.len);
+}
+
+test "parse return statement" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "return 42;");
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expect(result.ast[0] == .ret_stmt);
+    const stmt = result.ast[0].ret_stmt;
+    try testing.expectEqualStrings("42", stmt.value.literal.value);
+}
+
+test "parse empty block" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\fn empty() => void {
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    const decl = result.ast[0].fn_decl;
+    try testing.expectEqual(@as(usize, 0), decl.fn_body.len);
+}
+
+test "parse nested blocks" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\if (true) {
+        \\    if (false) {
+        \\        x = 1;
+        \\    }
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    const outer_if = result.ast[0].if_stmt;
+    try testing.expectEqual(@as(usize, 1), outer_if.if_body.len);
+    
+    try testing.expect(outer_if.if_body[0] == .if_stmt);
+    const inner_if = outer_if.if_body[0].if_stmt;
+    try testing.expectEqual(@as(usize, 1), inner_if.if_body.len);
+}
+
+// ====================================
+// ERROR RECOVERY TESTS
+// ====================================
+
+test "error: missing semicolon" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let x: i32 = 42");
+    
+    try testing.expect(result.diagnostics.len > 0);
+    try expectError(result.diagnostics, "expected ';'");
+
+    try testing.expectEqual(@as(usize, 1), result.ast.len);
+    try testing.expect(result.ast[0] == .var_decl);
+}
+
+test "error: missing closing paren" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "foo(42;");
+    try testing.expect(result.diagnostics.len > 0);
+    try expectError(result.diagnostics, "expected ')'");
+}
+
+test "error: missing closing brace" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\fn test() => void {
+        \\    return;
+    );
+    try testing.expect(result.diagnostics.len > 0);
+}
+
+test "error: invalid type annotation" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let x: pekka = 42;");
+    try testing.expect(result.diagnostics.len > 0);
+    try expectError(result.diagnostics, "expected a type");
+}
+
+test "error recovery: continue after error" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\let x: i32 = 42
+        \\let y: i32 = 10;
+    );
+    
+    // should have error
+    try testing.expect(result.diagnostics.len > 0);
+}
+
+test "recoverable errors: multiple issues" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    // missing colon & semicolon
+    const result = try parseSource(allocator, "let x i32 = 42");
+    
+    // should report both errors
+    try testing.expect(result.diagnostics.len >= 2);
+    
+    // but still parse further
+    try testing.expectEqual(@as(usize, 1), result.ast.len);
+    try testing.expect(result.ast[0] == .var_decl);
+}
+
+test "fatal error: missing identifier" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, "let : i32 = 42;");
+    
+    try testing.expect(result.diagnostics.len > 0);
+    
+    // shouldn't create a declaration due to fatal error
+    try testing.expectEqual(@as(usize, 0), result.ast.len);
+}
+
+// ====================================
+// PROGRAM TESTS
+// ====================================
+
+test "parse complete program" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    
+    const result = try parseSource(allocator, 
+        \\extern fn putchar(c: c_int) => c_int;
+        \\
+        \\fn main() => void {
+        \\    let x: i32 = 0;
+        \\    while (x < 10) {
+        \\        putchar(48 + x);
+        \\        x += 1;
+        \\    }
+        \\}
+    );
+    try expectNoErrors(result.diagnostics);
+    
+    try testing.expectEqual(@as(usize, 2), result.ast.len);
+    try testing.expect(result.ast[0] == .extern_fn_decl);
+    try testing.expect(result.ast[1] == .fn_decl);
+    try testing.expect(result.ast[1].fn_decl.fn_body[0] == .var_decl);
+    try testing.expect(result.ast[1].fn_decl.fn_body[1] == .while_loop);
+}
+
+// TODO add:
+// - complex expression tests
+// - more edge cases
+// - type (like i32) parsing tests

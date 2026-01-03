@@ -22,7 +22,11 @@ pub const Span = struct {
 };
 
 test {
-    _ = @import("tests/test-compiler.zig");
+    print("Tokenizer tests...\n", .{});
+    _ = @import("Tokenizer.zig");
+
+    print("Parser tests...\n", .{});
+    _ = @import("Parser.zig");
 }
 
 pub fn main() !void {
@@ -48,7 +52,8 @@ pub fn main() !void {
     //}
 
     var parser = Parser.init(line_tokens, allocator);
-    const ast = try parser.parseTokens();
+    const nullable = try parser.parseTokens();
+    const ast = nullable.?;
 
     // check parsing errors before going to semantic analysis
     const diagnostics = try parser.getDiagnostics();
@@ -59,11 +64,11 @@ pub fn main() !void {
                     if (diag.msg == null) {
                         print(
                             "Error at line {d}: after '{s}'\n",
-                            .{diag.token.span.line, diag.token.lexeme}
+                            .{diag.token.span.?.line, diag.token.lexeme}
                         );
                     } else print(
                         "Error at line {d}: {s} after '{s}'\n",
-                        .{diag.token.span.line, diag.msg.?, diag.token.lexeme}
+                        .{diag.token.span.?.line, diag.msg.?, diag.token.lexeme}
                     );
                 },
                 else => {},

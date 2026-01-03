@@ -95,12 +95,14 @@ pub const TokenType = enum {
     AS,
     TRY,
     PUB,
+
+    EOF,
 };
 
 pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
-    span: Span,
+    span: ?Span,
 };
 
 fn initTokens() std.array_list.Aligned(Token, null) {
@@ -195,6 +197,17 @@ pub const Tokenizer = struct {
             self.start = self.current;
             try getToken(self);
         }
+
+        try self.tokens.append(self.alloc, Token{
+            .token_type = .EOF,
+            .lexeme = "",
+            .span = Span{
+                .line = self.line,
+                .start_col = self.col,
+                .end_col = self.col,
+                .source_file = null,
+            }
+        });
 
         return self.tokens.toOwnedSlice(self.alloc);
     }
@@ -402,3 +415,72 @@ pub const Tokenizer = struct {
         return true;
     }
 };
+
+
+// --- TESTS ---
+
+const testing = std.testing;
+
+fn expectTokens(source: []const u8, expected: []const Token) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    
+    var tokenizer = try Tokenizer.init(allocator, source);
+    const output = try tokenizer.getTokens();
+
+    for (expected, output) |exp_token, actual| {
+        try testing.expectEqual(exp_token.token_type, actual.token_type);
+        try testing.expectEqualStrings(exp_token.lexeme, actual.lexeme);
+    }
+
+    arena.deinit();
+}
+
+test "single tokens" {
+    try expectTokens("(", &.{
+        .{ .token_type = .LEFT_PAREN, .lexeme = "(", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+
+    try expectTokens("+", &.{
+        .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "multiple tokens" {
+    try expectTokens("42 + 1", &.{
+        .{ .token_type = .INTEGER, .lexeme = "42", .span = null },
+        .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .INTEGER, .lexeme = "1", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "identifiers" {
+    try expectTokens("x + y", &.{
+        .{ .token_type = .IDENTIFIER, .lexeme = "x", .span = null },
+        .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .IDENTIFIER, .lexeme = "y", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "keywords" {
+    try expectTokens("for std fn extern", &.{
+        .{ .token_type = .FOR, .lexeme = "for", .span = null },
+        .{ .token_type = .STD, .lexeme = "std", .span = null },
+        .{ .token_type = .FN, .lexeme = "fn", .span = null },
+        .{ .token_type = .EXTERN, .lexeme = "extern", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "error cases" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const alloc = arena.allocator();
+    
+    var tokenizer = try Tokenizer.init(alloc, "@@@");
+    const err = tokenizer.getTokens();
+    try testing.expectError(error.UnexpectedCharacter, err);
+}

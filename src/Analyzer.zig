@@ -3,7 +3,6 @@ const Stmt = @import("Parser.zig").Stmt;
 const Span = @import("main.zig").Span;
 const Expr = @import("Parser.zig").Expr;
 const Type = @import("Parser.zig").Type;
-const c = @import("llvm.zig").c;
 
 const print = std.debug.print;
 
