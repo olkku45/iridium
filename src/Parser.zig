@@ -1092,7 +1092,7 @@ const errors = error{
 };
 
 fn parseSource(allocator: std.mem.Allocator, source: []const u8) !struct {
-    ast: []Stmt,
+    ast: []TopLevelStmt,
     diagnostics: []Diagnostic,
 } {
     var tokenizer = try Tokenizer.init(allocator, source);
@@ -1102,7 +1102,33 @@ fn parseSource(allocator: std.mem.Allocator, source: []const u8) !struct {
     const ast = try parser.parseTokens();
     const diagnostics = try parser.getDiagnostics();
 
-    return .{ .ast = ast.?, .diagnostics = diagnostics };
+    return .{ .ast = ast, .diagnostics = diagnostics };
+}
+
+fn parseStmtInFunction(allocator: std.mem.Allocator, stmt: []const u8) !struct {
+    ast: []TopLevelStmt,
+    diagnostics: []Diagnostic,
+} {
+    const source = std.fmt.allocPrint(allocator,
+        \\fn main() => void {{
+        \\    {s}
+        \\}}
+    , .{stmt}) catch unreachable;
+
+    return parseSource(allocator, source);
+}
+
+fn parseExprInFunction(allocator: std.mem.Allocator, expr: []const u8) !struct {
+    ast: []TopLevelStmt,
+    diagnostics: []Diagnostic,
+} {
+    const source = std.fmt.allocPrint(allocator,
+        \\fn main() => void {{
+        \\    {s};
+        \\}}
+    , .{expr}) catch unreachable;
+
+    return parseSource(allocator, source);
 }
 
 fn expectNoErrors(diagnostics: []Diagnostic) !void {
@@ -1143,13 +1169,13 @@ test "parse integer literal" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const result = try parseSource(allocator, "42;");
+    const result = try parseExprInFunction(allocator, "42");
     try expectNoErrors(result.diagnostics);
 
     try testing.expectEqual(@as(usize, 1), result.ast.len);
-    try testing.expect(result.ast[0] == .expr_stmt);
+    try testing.expect(result.ast[0].fn_decl[0] == .expr_stmt);
 
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
     try testing.expect(expr == .literal);
     try testing.expectEqualStrings("42", expr.literal.value);
     try testing.expectEqual(LiteralType.int, expr.literal.type);
@@ -1160,10 +1186,14 @@ test "parse string literal" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const result = try parseSource(allocator, "\"hello world\";");
+    const result = try parseSource(allocator,
+        \\fn main() => void {
+        \\    "hello world";
+        \\}
+    );
     try expectNoErrors(result.diagnostics);
 
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
     try testing.expect(expr == .literal);
     try testing.expectEqualStrings("hello world", expr.literal.value);
     try testing.expectEqual(LiteralType.string, expr.literal.type);
@@ -1175,17 +1205,25 @@ test "parse boolean literals" {
     const allocator = arena.allocator();
 
     {
-        const result = try parseSource(allocator, "true;");
+        const result = try parseSource(allocator,
+            \\fn main() => void {
+            \\    true;
+            \\}
+        );
         try expectNoErrors(result.diagnostics);
-        const expr = result.ast[0].expr_stmt.expr;
+        const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
         try testing.expectEqual(LiteralType.boolean, expr.literal.type);
         try testing.expectEqualStrings("true", expr.literal.value);
     }
 
     {
-        const result = try parseSource(allocator, "false;");
+        const result = try parseSource(allocator,
+            \\fn main() => void {
+            \\    false;
+            \\}
+        );
         try expectNoErrors(result.diagnostics);
-        const expr = result.ast[0].expr_stmt.expr;
+        const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
         try testing.expectEqual(LiteralType.boolean, expr.literal.type);
         try testing.expectEqualStrings("false", expr.literal.value);
     }
