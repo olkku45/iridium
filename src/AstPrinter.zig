@@ -3,6 +3,7 @@ const Tokenizer = @import("Tokenizer.zig");
 const Parser = @import("Parser.zig");
 const Stmt = @import("Parser.zig").Stmt;
 const Expr = @import("Parser.zig").Expr;
+const TopLevelStmt = @import("Parser.zig").TopLevelStmt;
 
 pub const AstPrinter = struct {
     writer: *std.io.Writer,
@@ -17,17 +18,22 @@ pub const AstPrinter = struct {
         };
     }
 
-    pub fn printAst(self: *AstPrinter, ast: []Stmt) !void {
-        for (ast) |stmt| {
-            try printStmt(self, stmt);
+    pub fn printAst(self: *AstPrinter, ast: []TopLevelStmt) !void {
+        for (ast) |top_stmt| {
+            try printTopStmt(self, top_stmt);
+        }
+    }
+
+    fn printTopStmt(self: *AstPrinter, top_stmt: TopLevelStmt) !void {
+        switch (top_stmt) {
+            .extern_fn_decl => try printExternDecl(self, top_stmt),
+            .fn_decl => try printFnDecl(self, top_stmt),
         }
     }
 
     fn printStmt(self: *AstPrinter, stmt: Stmt) anyerror!void {
         switch (stmt) {
             .if_stmt => try printIfStmt(self, stmt),
-            .extern_fn_decl => try printExternDecl(self, stmt),
-            .fn_decl => try printFnDecl(self, stmt),
             .var_decl => try printVarDecl(self, stmt),
             .expr_stmt => try printExprStmt(self, stmt),
             .ret_stmt => try printRetStmt(self, stmt),
@@ -207,7 +213,7 @@ pub const AstPrinter = struct {
         self.dedent();
     }
 
-    fn printExternDecl(self: *AstPrinter, stmt: Stmt) !void {
+    fn printExternDecl(self: *AstPrinter, stmt: TopLevelStmt) !void {
         try self.writeIndent();
         try self.writer.writeAll("Extern Fn\n");
 
@@ -223,7 +229,7 @@ pub const AstPrinter = struct {
         self.dedent();
     }
 
-    fn printFnDecl(self: *AstPrinter, stmt: Stmt) anyerror!void {
+    fn printFnDecl(self: *AstPrinter, stmt: TopLevelStmt) anyerror!void {
         try self.writeIndent();
         try self.writer.writeAll("Function name\n");
 
@@ -238,7 +244,7 @@ pub const AstPrinter = struct {
 
         self.indent();
 
-        for (stmt.fn_decl.fn_body) |item| {
+        for (stmt.fn_decl.body) |item| {
             try self.printStmt(item);
         }
 

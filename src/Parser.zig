@@ -65,11 +65,32 @@ pub const Type = enum {
     CUSTOM,
 };
 
+pub const TopLevelStmt = union(enum) {
+    fn_decl: FnDecl,
+    extern_fn_decl: ExternFnDecl,
+    // struct_decl
+    // enum_decl
+    // use_stmt
+    // etc...
+
+    pub const FnDecl = struct {
+        name: Expr,
+        body: []Stmt,
+        ret_type: Type,
+    };
+
+    pub const ExternFnDecl = struct {
+        name: Expr,
+        arg_type: Type,
+        ret_type: Type,
+    };
+};
+
 // TODO: partial nodes
 pub const Stmt = union(enum) {
     if_stmt: IfStmt,
-    extern_fn_decl: ExternFnDecl,
-    fn_decl: FnDecl,
+    //extern_fn_decl: ExternFnDecl,
+    //fn_decl: FnDecl,
     var_decl: VariableDecl,
     expr_stmt: ExprStmt,
     ret_stmt: RetStmt,
@@ -82,6 +103,7 @@ pub const Stmt = union(enum) {
         //else_body: []Stmt,
     };
 
+    // TODO remove
     pub const ExternFnDecl = struct {
         name: Expr,
         arg_type: Type,
@@ -90,6 +112,7 @@ pub const Stmt = union(enum) {
         //symbol: ?*Symbol,
     };
 
+    // TODO remove
     pub const FnDecl = struct {
         name: Expr,
         fn_body: []Stmt,
@@ -104,7 +127,6 @@ pub const Stmt = union(enum) {
         value: Expr,
         mutable: bool,
         var_type: Type,
-        //symbol: ?*Symbol,
     };
 
     pub const ExprStmt = struct {
@@ -145,16 +167,12 @@ pub const Expr = union(enum) {
     pub const CallExpr = struct {
         func_name: Expr,
         args: []Expr,
-
-        //func_symbol: ?*Symbol,
-        //ret_type: ?TypeAnnotation,
     };
 
     pub const Literal = struct {
         value: []const u8,
         span: Span,
         type: LiteralType,
-        //annotation: ?TypeAnnotation,
     };
 
     pub const ErrorNode = struct {};
@@ -237,7 +255,7 @@ pub const Parser = struct {
     current: usize,
     alloc: std.mem.Allocator,
     diagnostics: std.array_list.Aligned(Diagnostic, null),
-    statements: std.array_list.Aligned(Stmt, null),
+    //statements: std.array_list.Aligned(Stmt, null),
 
     pub fn init(tokens: []Token, allocator: std.mem.Allocator) Parser {
         return Parser{
@@ -245,36 +263,39 @@ pub const Parser = struct {
             .current = 0,
             .alloc = allocator,
             .diagnostics = initDiagnostics(),
-            .statements = initStatements(),
+            //.statements = initStatements(),
         };
     }
 
-    pub fn parseTokens(self: *Parser) !?[]Stmt {
-        while (!isAtEnd(self)) {
-            const stmt = try parseStatement(self);
-            if (stmt) |s| {
-                try self.statements.append(self.alloc, s);
-            } else {
-                if (isAtEnd(self)) break;
+    pub fn parseTokens(self: *Parser) ![]TopLevelStmt {
+        var items: std.array_list.Aligned(TopLevelStmt, null) = .empty;
 
-                try collectError(self, "unexpected token", currToken(self));
-                try synchronize(self);
+        while (!isAtEnd(self)) {
+            if (try parseTopLevelStmt(self)) |stmt| {
+                try items.append(self.alloc, stmt);
             }
         }
         
-        return try self.statements.toOwnedSlice(self.alloc);
+        return try items.toOwnedSlice(self.alloc);
     }
 
     pub fn getDiagnostics(self: *Parser) ![]Diagnostic {
         return try self.diagnostics.toOwnedSlice(self.alloc);
     }
 
-    fn parseStatement(self: *Parser) anyerror!?Stmt {
-        const curr_token_type = getCurrentTokenType(self);
-
-        return switch (curr_token_type) {
+    fn parseTopLevelStmt(self: *Parser) !?TopLevelStmt {
+        return switch (getCurrentTokenType(self)) {
             .EXTERN => try externFnDeclaration(self) orelse return null,
             .FN => try fnDeclaration(self) orelse return null,
+            else => {
+                try self.collectError("expected top-level declaration", currToken(self));
+                return null;
+            }
+        };
+    }
+
+    fn parseStatement(self: *Parser) anyerror!?Stmt {
+        return switch (getCurrentTokenType(self)) {
             .LET => try variableDecl(self) orelse return null,
             .IF => try ifStmt(self) orelse return null,
             .RETURN => try retStmt(self) orelse return null,
@@ -289,6 +310,7 @@ pub const Parser = struct {
     fn parseBlock(self: *Parser) !?[]Stmt {
         var stmt_list: std.array_list.Aligned(Stmt, null) = .empty;
 
+        // fatal error (not a block)
         if (!try self.expect(.LEFT_BRACE, "expected '{'")) {
             return null;
         }
@@ -653,7 +675,7 @@ pub const Parser = struct {
        }};
     }
 
-    fn fnDeclaration(self: *Parser) !?Stmt {
+    fn fnDeclaration(self: *Parser) !?TopLevelStmt {
         if (!try self.expect(.FN, "expected 'fn'")) {
             return null;
         }
@@ -694,8 +716,8 @@ pub const Parser = struct {
         // if not return error except if ret type is void, or some other way to check for a
         // return statement...
         
-        return Stmt{ .fn_decl = .{
-            .fn_body = func_body,
+        return TopLevelStmt{ .fn_decl = .{
+            .body = func_body,
             .name = func_name,
             .ret_type = ret_type,
         }};
@@ -793,7 +815,7 @@ pub const Parser = struct {
         return stmt;
     }
 
-    fn externFnDeclaration(self: *Parser) !?Stmt {
+    fn externFnDeclaration(self: *Parser) !?TopLevelStmt {
         if (!try self.expect(.EXTERN, "expected 'extern'")) {
             return null;
         }
@@ -838,7 +860,7 @@ pub const Parser = struct {
 
         _ = try self.expect(.SEMICOLON, "expected ';'");
 
-        return Stmt{ .extern_fn_decl = .{
+        return TopLevelStmt{ .extern_fn_decl = .{
             .name = name,
             .arg_type = arg_type,
             .ret_type = ret_type,
