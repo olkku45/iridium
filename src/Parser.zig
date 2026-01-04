@@ -1089,12 +1089,18 @@ const testing = std.testing;
 const errors = error{
     UnexpectedParseErrors,
     ExpectedErrorNotFound,
+    NoTopLevelStmts,
+    NotAFunction,
+    EmptyFunction,
+    NotAnExprStmt,
 };
 
-fn parseSource(allocator: std.mem.Allocator, source: []const u8) !struct {
+const Result = struct {
     ast: []TopLevelStmt,
     diagnostics: []Diagnostic,
-} {
+};
+
+fn parseSource(allocator: std.mem.Allocator, source: []const u8) !Result {
     var tokenizer = try Tokenizer.init(allocator, source);
     const tokens = try tokenizer.getTokens();
 
@@ -1102,33 +1108,48 @@ fn parseSource(allocator: std.mem.Allocator, source: []const u8) !struct {
     const ast = try parser.parseTokens();
     const diagnostics = try parser.getDiagnostics();
 
-    return .{ .ast = ast, .diagnostics = diagnostics };
+    return Result{ .ast = ast, .diagnostics = diagnostics };
 }
 
-fn parseStmtInFunction(allocator: std.mem.Allocator, stmt: []const u8) !struct {
-    ast: []TopLevelStmt,
-    diagnostics: []Diagnostic,
-} {
+fn parseStmtInFunction(allocator: std.mem.Allocator, stmt: []const u8) !Result {
     const source = std.fmt.allocPrint(allocator,
         \\fn main() => void {{
         \\    {s}
         \\}}
     , .{stmt}) catch unreachable;
 
-    return parseSource(allocator, source);
+    return try parseSource(allocator, source);
 }
 
-fn parseExprInFunction(allocator: std.mem.Allocator, expr: []const u8) !struct {
-    ast: []TopLevelStmt,
-    diagnostics: []Diagnostic,
-} {
+fn parseExprInFunction(allocator: std.mem.Allocator, expr: []const u8) !Result {
     const source = std.fmt.allocPrint(allocator,
         \\fn main() => void {{
         \\    {s};
         \\}}
     , .{expr}) catch unreachable;
 
-    return parseSource(allocator, source);
+    return try parseSource(allocator, source);
+}
+
+fn getFirstExpr(result: anytype) !Expr {
+    if (result.ast.len == 0) return error.NoTopLevelStmts;
+    if (result.ast[0] != .fn_decl) return error.NotAFunction;
+
+    const fn_body = result.ast[0].fn_decl.body;
+    if (fn_body.len == 0) return error.EmptyFunction;
+    if (fn_body[0] != .expr_stmt) return error.NotAnExprStmt;
+
+    return fn_body[0].expr_stmt.expr;
+}
+
+fn getFirstStmt(result: anytype) !Stmt {
+    if (result.ast.len == 0) return error.NoTopLevelStmts;
+    if (result.ast[0] != .fn_decl) return error.NotAFunction;
+
+    const fn_body = result.ast[0].fn_decl.body;
+    if (fn_body.len == 0) return error.EmptyFunction;
+
+    return fn_body[0];
 }
 
 fn expectNoErrors(diagnostics: []Diagnostic) !void {
@@ -1172,10 +1193,7 @@ test "parse integer literal" {
     const result = try parseExprInFunction(allocator, "42");
     try expectNoErrors(result.diagnostics);
 
-    try testing.expectEqual(@as(usize, 1), result.ast.len);
-    try testing.expect(result.ast[0].fn_decl[0] == .expr_stmt);
-
-    const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .literal);
     try testing.expectEqualStrings("42", expr.literal.value);
     try testing.expectEqual(LiteralType.int, expr.literal.type);
@@ -1186,14 +1204,10 @@ test "parse string literal" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const result = try parseSource(allocator,
-        \\fn main() => void {
-        \\    "hello world";
-        \\}
-    );
+    const result = try parseExprInFunction(allocator, "\"hello world\"");
     try expectNoErrors(result.diagnostics);
 
-    const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .literal);
     try testing.expectEqualStrings("hello world", expr.literal.value);
     try testing.expectEqual(LiteralType.string, expr.literal.type);
@@ -1205,25 +1219,19 @@ test "parse boolean literals" {
     const allocator = arena.allocator();
 
     {
-        const result = try parseSource(allocator,
-            \\fn main() => void {
-            \\    true;
-            \\}
-        );
+        const result = try parseExprInFunction(allocator, "true");
         try expectNoErrors(result.diagnostics);
-        const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
+
+        const expr = try getFirstExpr(result);
         try testing.expectEqual(LiteralType.boolean, expr.literal.type);
         try testing.expectEqualStrings("true", expr.literal.value);
     }
 
     {
-        const result = try parseSource(allocator,
-            \\fn main() => void {
-            \\    false;
-            \\}
-        );
+        const result = try parseExprInFunction(allocator, "false");
         try expectNoErrors(result.diagnostics);
-        const expr = result.ast[0].fn_decl.body[0].expr_stmt.expr;
+        
+        const expr = try getFirstExpr(result);
         try testing.expectEqual(LiteralType.boolean, expr.literal.type);
         try testing.expectEqualStrings("false", expr.literal.value);
     }
@@ -1235,24 +1243,24 @@ test "parse binary expression: all operators" {
     const allocator = arena.allocator();
 
     const test_cases = [_]struct { source: []const u8, op: BinaryOp }{
-        .{ .source = "1 + 2;", .op = .ADD },
-        .{ .source = "1 - 2;", .op = .SUB },
-        .{ .source = "1 * 2;", .op = .MUL },
-        .{ .source = "1 / 2;", .op = .DIV },
-        .{ .source = "1 % 2;", .op = .MODULUS },
-        .{ .source = "1 == 2;", .op = .EQUAL_EQUAL },
-        .{ .source = "1 != 2;", .op = .NOT_EQUAL },
-        .{ .source = "1 < 2;", .op = .LESS },
-        .{ .source = "1 <= 2;", .op = .LESS_EQUAL },
-        .{ .source = "1 > 2;", .op = .GREATER },
-        .{ .source = "1 >= 2;", .op = .GREATER_EQUAL },
+        .{ .source = "1 + 2", .op = .ADD },
+        .{ .source = "1 - 2", .op = .SUB },
+        .{ .source = "1 * 2", .op = .MUL },
+        .{ .source = "1 / 2", .op = .DIV },
+        .{ .source = "1 % 2", .op = .MODULUS },
+        .{ .source = "1 == 2", .op = .EQUAL_EQUAL },
+        .{ .source = "1 != 2", .op = .NOT_EQUAL },
+        .{ .source = "1 < 2", .op = .LESS },
+        .{ .source = "1 <= 2", .op = .LESS_EQUAL },
+        .{ .source = "1 > 2", .op = .GREATER },
+        .{ .source = "1 >= 2", .op = .GREATER_EQUAL },
     };
 
     for (test_cases) |tc| {
-        const result = try parseSource(allocator, tc.source);
+        const result = try parseExprInFunction(allocator, tc.source);
         try expectNoErrors(result.diagnostics);
 
-        const expr = result.ast[0].expr_stmt.expr;
+        const expr = try getFirstExpr(result);
         try testing.expect(expr == .binary);
         try testing.expectEqual(tc.op, expr.binary.op);
     }
@@ -1263,10 +1271,10 @@ test "parse operator precedence: multiplication before addition" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "1 + 2 * 3;");
+    const result = try parseExprInFunction(allocator, "1 + 2 * 3");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .binary);
     try testing.expectEqual(BinaryOp.ADD, expr.binary.op);
 
@@ -1285,11 +1293,11 @@ test "parse operator precedence: parentheses override" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "(1 + 2) * 3;");
+
+    const result = try parseExprInFunction(allocator, "(1 + 2) * 3");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .binary);
     try testing.expectEqual(BinaryOp.MUL, expr.binary.op);
 
@@ -1308,11 +1316,11 @@ test "parse unary expression: negation" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "-42;");
+
+    const result = try parseExprInFunction(allocator, "-42");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .unary);
     try testing.expectEqual(UnaryOp.NEG, expr.unary.op);
     
@@ -1324,11 +1332,11 @@ test "parse unary expression: logical not" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "!true;");
+
+    const result = try parseExprInFunction(allocator, "!true");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .unary);
     try testing.expectEqual(UnaryOp.NOT, expr.unary.op);
 }
@@ -1337,11 +1345,11 @@ test "parse function call: no arguments" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "foo();");
+
+    const result = try parseExprInFunction(allocator, "foo()");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .func_call);
     try testing.expectEqual(@as(usize, 0), expr.func_call.args.len);
     
@@ -1354,10 +1362,10 @@ test "parse function call: single argument" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "foo(42);");
+    const result = try parseExprInFunction(allocator, "foo(42)");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .func_call);
     try testing.expectEqual(@as(usize, 1), expr.func_call.args.len);
     
@@ -1369,11 +1377,11 @@ test "parse function call: multiple arguments" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "foo(1, 2, 3);");
+
+    const result = try parseExprInFunction(allocator, "foo(1, 2, 3)");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .func_call);
     try testing.expectEqual(@as(usize, 3), expr.func_call.args.len);
     
@@ -1386,11 +1394,11 @@ test "parse assignment" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "x = 42;");
+
+    const result = try parseExprInFunction(allocator, "x = 42");
     try expectNoErrors(result.diagnostics);
     
-    const expr = result.ast[0].expr_stmt.expr;
+    const expr = try getFirstExpr(result);
     try testing.expect(expr == .binary);
     try testing.expectEqual(BinaryOp.EQUAL, expr.binary.op);
     
@@ -1404,17 +1412,17 @@ test "parse compound assignment operators" {
     const allocator = arena.allocator();
     
     const test_cases = [_]struct { source: []const u8, op: BinaryOp }{
-        .{ .source = "x += 1;", .op = .ADD_EQUAL },
-        .{ .source = "x -= 1;", .op = .SUB_EQUAL },
-        .{ .source = "x *= 2;", .op = .MUL_EQUAL },
-        .{ .source = "x /= 2;", .op = .DIV_EQUAL },
+        .{ .source = "x += 1", .op = .ADD_EQUAL },
+        .{ .source = "x -= 1", .op = .SUB_EQUAL },
+        .{ .source = "x *= 2", .op = .MUL_EQUAL },
+        .{ .source = "x /= 2", .op = .DIV_EQUAL },
     };
     
     for (test_cases) |tc| {
-        const result = try parseSource(allocator, tc.source);
+        const result = try parseExprInFunction(allocator, tc.source);
         try expectNoErrors(result.diagnostics);
         
-        const expr = result.ast[0].expr_stmt.expr;
+        const expr = try getFirstExpr(result);
         try testing.expect(expr == .binary);
         try testing.expectEqual(tc.op, expr.binary.op);
     }
@@ -1428,14 +1436,14 @@ test "parse variable declaration: immutable" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "let x: i32 = 42;");
+
+    const result = try parseStmtInFunction(allocator, "let x: i32 = 42;");
     try expectNoErrors(result.diagnostics);
     
     try testing.expectEqual(@as(usize, 1), result.ast.len);
-    try testing.expect(result.ast[0] == .var_decl);
-    
-    const decl = result.ast[0].var_decl;
+        
+    const first = try getFirstStmt(result);
+    const decl = first.var_decl;
     try testing.expectEqual(false, decl.mutable);
     try testing.expectEqualStrings("x", decl.name.literal.value);
     try testing.expectEqualStrings("42", decl.value.literal.value);
@@ -1445,11 +1453,12 @@ test "parse variable declaration: mutable" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    
-    const result = try parseSource(allocator, "let mut x: i32 = 42;");
+
+    const result = try parseStmtInFunction(allocator, "let mut x: i32 = 42;");
     try expectNoErrors(result.diagnostics);
     
-    const decl = result.ast[0].var_decl;
+    const first = try getFirstStmt(result);
+    const decl = first.var_decl;
     try testing.expectEqual(true, decl.mutable);
 }
 
@@ -1467,7 +1476,7 @@ test "parse function declaration: void return" {
     try testing.expect(result.ast[0] == .fn_decl);
     const decl = result.ast[0].fn_decl;
     try testing.expectEqualStrings("main", decl.name.literal.value);
-    try testing.expectEqual(@as(usize, 0), decl.fn_body.len);
+    try testing.expectEqual(@as(usize, 0), decl.body.len);
 }
 
 test "parse function declaration: with body" {
@@ -1483,8 +1492,8 @@ test "parse function declaration: with body" {
     try expectNoErrors(result.diagnostics);
     
     const decl = result.ast[0].fn_decl;
-    try testing.expectEqual(@as(usize, 1), decl.fn_body.len);
-    try testing.expect(decl.fn_body[0] == .ret_stmt);
+    try testing.expectEqual(@as(usize, 1), decl.body.len);
+    try testing.expect(decl.body[0] == .ret_stmt);
 }
 
 test "parse extern function declaration" {
@@ -1505,18 +1514,18 @@ test "parse if statement" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, 
+    const result = try parseStmtInFunction(allocator,
         \\if (true) {
         \\    x = 1;
         \\}
     );
     try expectNoErrors(result.diagnostics);
     
-    try testing.expect(result.ast[0] == .if_stmt);
-    const stmt = result.ast[0].if_stmt;
+    const stmt = try getFirstStmt(result);
+    const if_stmt = stmt.if_stmt;
     
-    try testing.expect(stmt.condition == .literal);
-    try testing.expectEqual(@as(usize, 1), stmt.if_body.len);
+    try testing.expect(if_stmt.condition == .literal);
+    try testing.expectEqual(@as(usize, 1), if_stmt.if_body.len);
 }
 
 test "parse while loop" {
@@ -1524,15 +1533,15 @@ test "parse while loop" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, 
+    const result = try parseStmtInFunction(allocator,
         \\while (x < 10) {
-        \\    x = x + 1;
+        \\    x += 1;
         \\}
     );
     try expectNoErrors(result.diagnostics);
-    
-    try testing.expect(result.ast[0] == .while_loop);
-    const loop = result.ast[0].while_loop;
+
+    const stmt = try getFirstStmt(result);
+    const loop = stmt.while_loop;
     
     try testing.expect(loop.cond == .binary);
     try testing.expectEqual(@as(usize, 1), loop.body.len);
@@ -1543,12 +1552,12 @@ test "parse return statement" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "return 42;");
+    const result = try parseStmtInFunction(allocator, "return 42;");
     try expectNoErrors(result.diagnostics);
-    
-    try testing.expect(result.ast[0] == .ret_stmt);
-    const stmt = result.ast[0].ret_stmt;
-    try testing.expectEqualStrings("42", stmt.value.literal.value);
+
+    const stmt = try getFirstStmt(result);
+    const ret = stmt.ret_stmt;
+    try testing.expectEqualStrings("42", ret.value.literal.value);
 }
 
 test "parse empty block" {
@@ -1563,7 +1572,7 @@ test "parse empty block" {
     try expectNoErrors(result.diagnostics);
     
     const decl = result.ast[0].fn_decl;
-    try testing.expectEqual(@as(usize, 0), decl.fn_body.len);
+    try testing.expectEqual(@as(usize, 0), decl.body.len);
 }
 
 test "parse nested blocks" {
@@ -1571,7 +1580,7 @@ test "parse nested blocks" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, 
+    const result = try parseStmtInFunction(allocator, 
         \\if (true) {
         \\    if (false) {
         \\        x = 1;
@@ -1580,7 +1589,8 @@ test "parse nested blocks" {
     );
     try expectNoErrors(result.diagnostics);
     
-    const outer_if = result.ast[0].if_stmt;
+    const stmt = try getFirstStmt(result);
+    const outer_if = stmt.if_stmt;
     try testing.expectEqual(@as(usize, 1), outer_if.if_body.len);
     
     try testing.expect(outer_if.if_body[0] == .if_stmt);
@@ -1597,13 +1607,13 @@ test "error: missing semicolon" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "let x: i32 = 42");
+    const result = try parseStmtInFunction(allocator, "let x: i32 = 42");
     
     try testing.expect(result.diagnostics.len > 0);
     try expectError(result.diagnostics, "expected ';'");
 
-    try testing.expectEqual(@as(usize, 1), result.ast.len);
-    try testing.expect(result.ast[0] == .var_decl);
+    const decl = try getFirstStmt(result);
+    try testing.expect(decl == .var_decl);
 }
 
 test "error: missing closing paren" {
@@ -1611,7 +1621,7 @@ test "error: missing closing paren" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "foo(42;");
+    const result = try parseStmtInFunction(allocator, "foo(42;");
     try testing.expect(result.diagnostics.len > 0);
     try expectError(result.diagnostics, "expected ')'");
 }
@@ -1633,7 +1643,7 @@ test "error: invalid type annotation" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "let x: pekka = 42;");
+    const result = try parseStmtInFunction(allocator, "let x: pekka = 42;");
     try testing.expect(result.diagnostics.len > 0);
     try expectError(result.diagnostics, "expected a type");
 }
@@ -1643,7 +1653,7 @@ test "error recovery: continue after error" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, 
+    const result = try parseStmtInFunction(allocator, 
         \\let x: i32 = 42
         \\let y: i32 = 10;
     );
@@ -1652,20 +1662,21 @@ test "error recovery: continue after error" {
     try testing.expect(result.diagnostics.len > 0);
 }
 
-test "recoverable errors: multiple issues" {
+test "recoverable error: multiple issues" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     
     // missing colon & semicolon
-    const result = try parseSource(allocator, "let x i32 = 42");
+    const result = try parseStmtInFunction(allocator, "let x i32 = 42");
     
     // should report both errors
     try testing.expect(result.diagnostics.len >= 2);
     
     // but still parse further
-    try testing.expectEqual(@as(usize, 1), result.ast.len);
-    try testing.expect(result.ast[0] == .var_decl);
+    const stmt = try getFirstStmt(result);
+    
+    try testing.expect(stmt == .var_decl);
 }
 
 test "fatal error: missing identifier" {
@@ -1673,12 +1684,13 @@ test "fatal error: missing identifier" {
     defer arena.deinit();
     const allocator = arena.allocator();
     
-    const result = try parseSource(allocator, "let : i32 = 42;");
+    const result = try parseStmtInFunction(allocator, "let : i32 = 42;");
     
     try testing.expect(result.diagnostics.len > 0);
     
     // shouldn't create a declaration due to fatal error
-    try testing.expectEqual(@as(usize, 0), result.ast.len);
+    const res = getFirstStmt(result);
+    try testing.expectError(error.EmptyFunction, res);
 }
 
 // ====================================
@@ -1706,8 +1718,8 @@ test "parse complete program" {
     try testing.expectEqual(@as(usize, 2), result.ast.len);
     try testing.expect(result.ast[0] == .extern_fn_decl);
     try testing.expect(result.ast[1] == .fn_decl);
-    try testing.expect(result.ast[1].fn_decl.fn_body[0] == .var_decl);
-    try testing.expect(result.ast[1].fn_decl.fn_body[1] == .while_loop);
+    try testing.expect(result.ast[1].fn_decl.body[0] == .var_decl);
+    try testing.expect(result.ast[1].fn_decl.body[1] == .while_loop);
 }
 
 // TODO add:

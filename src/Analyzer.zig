@@ -1,3 +1,7 @@
+//
+// check variable lifetimes, scopes, warn about unused variables,
+// etc
+
 const std = @import("std");
 const Stmt = @import("Parser.zig").Stmt;
 const Span = @import("main.zig").Span;
