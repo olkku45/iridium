@@ -52,8 +52,7 @@ pub fn main() !void {
     //}
 
     var parser = Parser.init(line_tokens, allocator);
-    const nullable = try parser.parseTokens();
-    const ast = nullable.?;
+    const ast = try parser.parseTokens();
 
     // check parsing errors before going to semantic analysis
     const diagnostics = try parser.getDiagnostics();

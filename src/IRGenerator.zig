@@ -4,6 +4,7 @@ const Expr = @import("Parser.zig").Expr;
 const Type = @import("Parser.zig").Type;
 const BinaryOp = @import("Parser.zig").BinaryOp;
 const UnaryOp = @import("Parser.zig").UnaryOp;
+const TopLevelStmt = @import("Parser.zig").TopLevelStmt;
 
 const Parameter = struct {
     name: Expr.Literal,
@@ -54,12 +55,12 @@ fn initInstructions() std.ArrayList(Instruction) {
 }
 
 pub const IRGenerator = struct {
-    ast: []Stmt,
+    ast: []TopLevelStmt,
     ir: std.ArrayList(Instruction),
     allocator: std.mem.Allocator,
     temp_count: usize,
 
-    pub fn init(ast: []Stmt, allocator: std.mem.Allocator) IRGenerator {
+    pub fn init(ast: []TopLevelStmt, allocator: std.mem.Allocator) IRGenerator {
         return IRGenerator{
             .ast = ast,
             .ir = initInstructions(),
@@ -70,17 +71,23 @@ pub const IRGenerator = struct {
 
     pub fn generateIr(self: *IRGenerator) ![]Instruction {
         for (self.ast) |stmt| {
-            try generateInstruction(self, stmt);
+            try generateTopLevelInstruction(self, stmt);
         }
         const slice = try self.ir.toOwnedSlice(self.allocator);
         return slice;
     }
 
-    fn generateInstruction(self: *IRGenerator, stmt: Stmt) anyerror!void {
+    fn generateTopLevelInstruction(self: *IRGenerator, stmt: TopLevelStmt) anyerror!void {
         switch (stmt) {
             .fn_decl => |fn_decl| {
                 try generateFunctionInstruction(self, fn_decl);
             },
+            else => {},
+        }
+    }
+
+    fn generateInstruction(self: *IRGenerator, stmt: Stmt) anyerror!void {
+        switch (stmt) {
             .var_decl => |var_decl| {
                 try generateVarInstruction(self, var_decl);
             },
@@ -89,9 +96,9 @@ pub const IRGenerator = struct {
             },
             else => {},
         }
-    }
+    } 
 
-    fn generateFunctionInstruction(self: *IRGenerator, fn_decl: Stmt.FnDecl) !void {
+    fn generateFunctionInstruction(self: *IRGenerator, fn_decl: TopLevelStmt.FnDecl) !void {
         const func = Instruction{ .function = .{
             .func_type = fn_decl.ret_type,
             .name = fn_decl.name.literal,
@@ -99,7 +106,7 @@ pub const IRGenerator = struct {
         }};
         try self.ir.append(self.allocator, func);
 
-        for (fn_decl.fn_body) |stmt| {
+        for (fn_decl.body) |stmt| {
             try generateInstruction(self, stmt);
         }
 

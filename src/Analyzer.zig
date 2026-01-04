@@ -1,8 +1,13 @@
+//
+// check variable lifetimes, scopes, warn about unused variables,
+// etc
+
 const std = @import("std");
 const Stmt = @import("Parser.zig").Stmt;
 const Span = @import("main.zig").Span;
 const Expr = @import("Parser.zig").Expr;
 const Type = @import("Parser.zig").Type;
+const TopLevelStmt = @import("Parser.zig").TopLevelStmt;
 
 const print = std.debug.print;
 
@@ -115,9 +120,15 @@ pub const SymbolTable = struct {
 };
 
 pub const AnalyzedNode = union(enum) {
+    top_level: TopLevelDecl,
     stmt: AnalyzedStmt,
     call: AnalyzedFuncCall,
-    literal: AnalyzedLiteral,  
+    literal: AnalyzedLiteral,
+
+    pub const TopLevelDecl = struct {
+        parsed: TopLevelStmt,
+        symbol: Symbol,
+    };
 
     pub const AnalyzedStmt = struct {
         parsed: Stmt,
@@ -137,12 +148,12 @@ pub const AnalyzedNode = union(enum) {
 };
 
 pub const Analyzer = struct {
-    ast: []Stmt,
+    ast: []TopLevelStmt,
     symbol_table: SymbolTable,
     alloc: std.mem.Allocator,
     diagnostics: std.array_list.Aligned(Diagnostic, null),
 
-    pub fn init(ast: []Stmt, allocator: std.mem.Allocator) !Analyzer {
+    pub fn init(ast: []TopLevelStmt, allocator: std.mem.Allocator) !Analyzer {
         return Analyzer{
             .ast = ast,
             .symbol_table = try SymbolTable.init(allocator),
@@ -156,8 +167,10 @@ pub const Analyzer = struct {
 
         var nodes: std.array_list.Aligned(AnalyzedNode, null) = .empty;
         for (self.ast) |top_stmt| {
-            try nodes.append(self.alloc,
-            try self.traverseTopStmt(top_stmt) orelse return null);
+            try nodes.append(
+                self.alloc,
+                try self.traverseTopStmt(top_stmt) orelse return null
+            );
         }
 
         var it = self.symbol_table.current_scope.*.symbols.iterator();
@@ -196,7 +209,7 @@ pub const Analyzer = struct {
         return try nodes.toOwnedSlice(self.alloc);
     }
 
-    fn traverseTopStmt(self: *Analyzer, stmt: Stmt) !?AnalyzedNode {
+    fn traverseTopStmt(self: *Analyzer, stmt: TopLevelStmt) !?AnalyzedNode {
         return switch (stmt) {
             .fn_decl => |s| {
                 return try checkFunction(self, s);
@@ -204,19 +217,16 @@ pub const Analyzer = struct {
             .extern_fn_decl => |s| {
                 return try checkExternDecl(self, s);
             },
-            else => {
-                return null;
-            },
         };
     }
 
-    fn checkExternDecl(self: *Analyzer, stmt: Stmt.ExternFnDecl) !AnalyzedNode {
-        if (self.symbol_table.lookupItem(stmt.name.literal.value) != null) {
+    fn checkExternDecl(self: *Analyzer, ext: TopLevelStmt.ExternFnDecl) !AnalyzedNode {
+        if (self.symbol_table.lookupItem(ext.name.literal.value) != null) {
             try collectError(
                 self,
                 "#45421 external function with this name is already declared",
-                stmt.name.literal.value,
-                stmt.name.literal.span,
+                ext.name.literal.value,
+                ext.name.literal.span,
             );
         } 
         
@@ -224,25 +234,25 @@ pub const Analyzer = struct {
         ptr.* = 0;
 
         const extern_decl_symbol = Symbol{ .extern_fn = .{
-            .name = stmt.name.literal.value,
+            .name = ext.name.literal.value,
             .ref_count = ptr,
-            .span = stmt.name.literal.span,
-            .ret_type = stmt.ret_type,
-            .param_type = stmt.arg_type,
+            .span = ext.name.literal.span,
+            .ret_type = ext.ret_type,
+            .param_type = ext.arg_type,
         }};
         
         try self.symbol_table.addItemToScope(
-            stmt.name.literal.value,
+            ext.name.literal.value,
             extern_decl_symbol
         );
 
-        return AnalyzedNode{ .stmt = .{
-            .parsed = Stmt{ .extern_fn_decl = stmt },
+        return AnalyzedNode{ .top_level = .{
+            .parsed = TopLevelStmt{ .extern_fn_decl = ext },
             .symbol = extern_decl_symbol,
         }};
     }
 
-    fn checkFunction(self: *Analyzer, func: Stmt.FnDecl) !AnalyzedNode {
+    fn checkFunction(self: *Analyzer, func: TopLevelStmt.FnDecl) !AnalyzedNode {
         if (self.symbol_table.lookupItem(func.name.literal.value) != null) {
             try collectError(
                 self,
@@ -252,7 +262,7 @@ pub const Analyzer = struct {
             );
         }
         
-        try checkBlock(self, func.fn_body);
+        try checkBlock(self, func.body);
 
         const ptr = try self.alloc.create(u32);
         ptr.* = 0;
@@ -266,8 +276,8 @@ pub const Analyzer = struct {
         
         try self.symbol_table.addItemToScope(func.name.literal.value, fn_symbol);
 
-        return AnalyzedNode{ .stmt = .{
-            .parsed = Stmt{ .fn_decl = func },
+        return AnalyzedNode{ .top_level = .{
+            .parsed = TopLevelStmt{ .fn_decl = func },
             .symbol = fn_symbol,
         }};
     }
@@ -295,22 +305,6 @@ pub const Analyzer = struct {
             switch (stmt) {
                 .expr_stmt => |s| {
                     try checkExpr(self, s.expr);
-                },
-                .extern_fn_decl => |s| {
-                    try collectError(
-                        self,
-                        "#09134 cannot define external function in block",
-                        s.name.literal.value,
-                        s.name.literal.span
-                    );
-                },
-                .fn_decl => |s| {
-                    try collectError(
-                        self,
-                        "#41310 nested functions not supported",
-                        s.name.literal.value,
-                        s.name.literal.span
-                    );
                 },
                 .if_stmt => |s| {
                     try checkExpr(self, s.condition);
