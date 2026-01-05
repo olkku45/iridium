@@ -421,40 +421,42 @@ pub const Tokenizer = struct {
     }
 };
 
-
-// --- TESTS ---
+// ====================================
+// TESTS
+// ====================================
 
 const testing = std.testing;
 
-fn expectTokens(source: []const u8, expected: []const Token) !void {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    const allocator = arena.allocator();
-    
-    var tokenizer = try Tokenizer.init(allocator, source);
-    const output = try tokenizer.getTokens();
+fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []const Token) !void {
+    const output = testTokenize(allocator, source);
 
     for (expected, output) |exp_token, actual| {
         try testing.expectEqual(exp_token.token_type, actual.token_type);
         try testing.expectEqualStrings(exp_token.lexeme, actual.lexeme);
     }
-
-    arena.deinit();
 }
 
-test "single tokens" {
-    try expectTokens("(", &.{
+fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {   
+    var tokenizer = try Tokenizer.init(allocator, source);
+    return try tokenizer.getTokens();
+}
+
+test "basic tests" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+      
+    try expectTokens(allocator, "(", &.{
         .{ .token_type = .LEFT_PAREN, .lexeme = "(", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 
-    try expectTokens("+", &.{
+    try expectTokens(allocator, "+", &.{
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
-}
 
-test "multiple tokens" {
-    try expectTokens("42 + 1", &.{
+    try expectTokens(allocator, "42 + 1", &.{
         .{ .token_type = .INTEGER, .lexeme = "42", .span = null },
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
         .{ .token_type = .INTEGER, .lexeme = "1", .span = null },
@@ -463,7 +465,11 @@ test "multiple tokens" {
 }
 
 test "identifiers" {
-    try expectTokens("x + y", &.{
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "x + y", &.{
         .{ .token_type = .IDENTIFIER, .lexeme = "x", .span = null },
         .{ .token_type = .PLUS, .lexeme = "+", .span = null },
         .{ .token_type = .IDENTIFIER, .lexeme = "y", .span = null },
@@ -471,8 +477,35 @@ test "identifiers" {
     });
 }
 
+test "character literals" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+      
+    try expectTokens(allocator, "'a' '\n'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "a", .span = null },
+        .{ .token_type = .CHARACTER, .lexeme = "\n", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null }, 
+    });
+}
+
+test "string literal" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+      
+    try expectTokens(allocator, "\"hello world\"", &.{
+        .{ .token_type = .STRING, .lexeme = "hello world", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
 test "keywords" {
-    try expectTokens("for std fn extern", &.{
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+     
+    try expectTokens(allocator, "for std fn extern", &.{
         .{ .token_type = .FOR, .lexeme = "for", .span = null },
         .{ .token_type = .STD, .lexeme = "std", .span = null },
         .{ .token_type = .FN, .lexeme = "fn", .span = null },
@@ -481,11 +514,20 @@ test "keywords" {
     });
 }
 
-test "error cases" {
+// ====================================
+// ERROR CASES
+// ====================================
+
+// '@' may be added later for built-in functions
+test "invalid character" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const alloc = arena.allocator();
+    const allocator = arena.allocator();
+    defer arena.deinit();
     
-    var tokenizer = try Tokenizer.init(alloc, "@@@");
-    const err = tokenizer.getTokens();
+    const err = testTokenize(allocator, "@");
     try testing.expectError(error.UnexpectedCharacter, err);
+}
+
+test "multiple characters in char literal" {
+    
 }
