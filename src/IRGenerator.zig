@@ -6,6 +6,9 @@ const BinaryOp = @import("Parser.zig").BinaryOp;
 const UnaryOp = @import("Parser.zig").UnaryOp;
 const TopLevelStmt = @import("Parser.zig").TopLevelStmt;
 
+const Tokenizer = @import("Tokenizer.zig").Tokenizer;
+const Parser = @import("Parser.zig").Parser;
+
 const Parameter = struct {
     name: Expr.Literal,
     param_type: Type,
@@ -110,7 +113,7 @@ pub const IRGenerator = struct {
             try generateInstruction(self, stmt);
         }
 
-        const end = Instruction{ .func_end = Instruction.FuncEnd{}};
+        const end = Instruction{ .func_end = Instruction.FuncEnd{} };
         try self.ir.append(self.allocator, end);
     }
 
@@ -192,3 +195,82 @@ pub const IRGenerator = struct {
         return temp;
     }
 };
+
+// ====================================
+// TESTS
+// ====================================
+
+const testing = std.testing;
+
+fn testGenerateIr(allocator: std.mem.Allocator, source: []const u8) ![]Instruction {
+    var tokenizer = try Tokenizer.init(allocator, source);
+    const tokens = try tokenizer.getTokens();
+
+    var parser = Parser.init(tokens, allocator);
+    const ast = try parser.parseTokens();
+
+    var ir_gen = IRGenerator.init(ast, allocator);
+    return try ir_gen.generateIr();
+}
+
+// ====================================
+// IR STRUCTURE TESTS
+// ====================================
+
+test "empty function" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const ir = try testGenerateIr(allocator,
+        \\fn main() => i32 {
+        \\}
+    );
+
+    try testing.expect(ir[0] == .function);
+    try testing.expect(ir[1] == .func_end);
+    try testing.expect(ir[0].function.func_type == .INT32);
+}
+
+test "function with return" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const ir = try testGenerateIr(allocator,
+        \\fn main() => i32 {
+        \\    return 0;
+        \\}
+    );
+
+    try testing.expect(ir[1] == .ret);
+    try testing.expectEqualStrings("0", ir[1].ret.ret_val.literal.value);
+}
+
+test "variable declaration and temp expressions" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const ir = try testGenerateIr(allocator,
+        \\fn main() => i32 {
+        \\    let x: i32 = 3 + 2 * 1;
+        \\}
+    );
+        
+    try testing.expect(ir.len == 6);
+    try testing.expect(ir[0] == .function);
+    try testing.expect(ir[1] == .allocation);
+    
+    try testing.expect(ir[2] == .expression);
+    try testing.expectEqualStrings(ir[2].expression.temp, "t0");
+    try testing.expectEqualStrings(ir[2].expression.first, "2");
+    try testing.expectEqualStrings(ir[2].expression.second.?, "1");
+    
+    try testing.expect(ir[3] == .expression);
+    try testing.expectEqualStrings(ir[3].expression.temp, "t1");
+    try testing.expectEqualStrings(ir[3].expression.second.?, "t0");
+    
+    try testing.expect(ir[4] == .assignment);
+    try testing.expect(ir[5] == .func_end);
+}
