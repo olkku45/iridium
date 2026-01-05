@@ -315,9 +315,14 @@ pub const Tokenizer = struct {
         }
     }
 
+    // 'a', '\n', '\''
     fn character(self: *Tokenizer) !void {
-        while (peek(self) != '\'' and !isAtEnd(self)) advance(self);
-        advance(self);
+        if (peek(self) == '\\') {
+            while (!isAtEnd(self) and peek(self) != '\'') advance(self);
+            if (!isAtEnd(self)) advance(self);
+        } else {
+            if (!isAtEnd(self)) advance(self);
+        }
 
         try addToken(self, .CHARACTER);
     }
