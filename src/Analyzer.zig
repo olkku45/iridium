@@ -14,7 +14,6 @@ const print = std.debug.print;
 const Diagnostic = struct {
     msg: ?[]const u8,
     severity: enum { err, warn, info },
-    //stmt: Stmt,
     value: []const u8,
     span: Span,
 };
@@ -42,7 +41,7 @@ pub const Symbol = union(enum) {
         span: Span,
         ref_count: *u32,
         name: []const u8,
-        //param_types: []TypeAnnotation,
+        //param_types
         ret_type: Type,        
     };
 
@@ -162,15 +161,12 @@ pub const Analyzer = struct {
         };
     }
 
-    pub fn analyze(self: *Analyzer) !?[]AnalyzedNode {
+    pub fn analyze(self: *Analyzer) ![]AnalyzedNode {
         try self.symbol_table.enterScope(); // 'program scope'
 
         var nodes: std.array_list.Aligned(AnalyzedNode, null) = .empty;
         for (self.ast) |top_stmt| {
-            try nodes.append(
-                self.alloc,
-                try self.traverseTopStmt(top_stmt) orelse return null
-            );
+            try nodes.append(self.alloc, try self.traverseTopStmt(top_stmt));
         }
 
         var it = self.symbol_table.current_scope.*.symbols.iterator();
@@ -182,7 +178,7 @@ pub const Analyzer = struct {
                         if (std.mem.eql(u8, f.name, "main")) break;
                         try collectWarning(
                             self,
-                            "#09412 unused function",
+                            "unused function",
                             f.name,
                             f.span
                         );
@@ -194,7 +190,7 @@ pub const Analyzer = struct {
                         if (std.mem.eql(u8, ef.name, "putchar")) break;
                         try collectWarning(
                             self,
-                            "#45902 unused external function",
+                            "unused external function",
                             ef.name,
                             ef.span
                         );
@@ -209,7 +205,7 @@ pub const Analyzer = struct {
         return try nodes.toOwnedSlice(self.alloc);
     }
 
-    fn traverseTopStmt(self: *Analyzer, stmt: TopLevelStmt) !?AnalyzedNode {
+    fn traverseTopStmt(self: *Analyzer, stmt: TopLevelStmt) !AnalyzedNode {
         return switch (stmt) {
             .fn_decl => |s| {
                 return try checkFunction(self, s);
@@ -224,7 +220,7 @@ pub const Analyzer = struct {
         if (self.symbol_table.lookupItem(ext.name.literal.value) != null) {
             try collectError(
                 self,
-                "#45421 external function with this name is already declared",
+                "external function with this name is already declared",
                 ext.name.literal.value,
                 ext.name.literal.span,
             );
@@ -256,7 +252,7 @@ pub const Analyzer = struct {
         if (self.symbol_table.lookupItem(func.name.literal.value) != null) {
             try collectError(
                 self,
-                "#24323 function with this name is already declared",
+                "function with this name is already declared",
                 func.name.literal.value,
                 func.name.literal.span
             );
@@ -288,7 +284,7 @@ pub const Analyzer = struct {
             if (lookup == null) {
                 try collectError(
                     self,
-                    "#9852 variable not found",
+                    "variable not found",
                     ret_stmt.value.literal.value,
                     ret_stmt.value.literal.span
                 );
@@ -331,7 +327,7 @@ pub const Analyzer = struct {
                     if (v.ref_count.* == 0) {
                         try collectWarning(
                             self,
-                            "#14398 unused variable",
+                            "unused variable",
                             v.name,
                             v.span,
                         );
@@ -376,7 +372,7 @@ pub const Analyzer = struct {
                 if (std.mem.eql(u8, lit_expr.value, "println")) return;
                 try collectError(
                     self,
-                    "#5913 symbol not found",
+                    "symbol not found",
                     lit_expr.value,
                     lit_expr.span
                 );
@@ -395,7 +391,7 @@ pub const Analyzer = struct {
         if (lookup != null) {
             try collectError(
                 self,
-                "#59013 variable with this name already exists",
+                "variable with this name already exists",
                 decl.name.literal.value,
                 decl.name.literal.span
             );
@@ -438,3 +434,11 @@ pub const Analyzer = struct {
         try self.diagnostics.append(self.alloc, diag);
     }
 };
+
+// ====================================
+// TESTS
+// ====================================
+
+const testing = std.testing;
+
+

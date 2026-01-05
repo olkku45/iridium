@@ -27,6 +27,9 @@ test {
 
     print("Parser tests...\n", .{});
     _ = @import("Parser.zig");
+
+    print("IRGen tests...\n", .{});
+    _ = @import("IRGenerator.zig");
 }
 
 pub fn main() !void {
