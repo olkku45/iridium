@@ -242,7 +242,7 @@ pub const Tokenizer = struct {
             .lexeme = token_value,
             .token_type = token_type,
             .span = Span{
-                .start_col = self.col - text.len,
+                .start_col = self.start,
                 .end_col = self.col,
                 .line = self.line,
                 .source_file = null,
@@ -339,7 +339,6 @@ pub const Tokenizer = struct {
                         .{char}
                     );
                     try collectError(self, msg);
-                    return error.UnexpectedCharacter;
                 }
             },
         }
@@ -547,94 +546,103 @@ pub const Tokenizer = struct {
     fn isDigit(char: u8) bool {
         return char >= '0' and char <= '9';
     }
-
+    
     fn number(self: *Tokenizer) !void {
         const start_col = self.col - 1;
         var has_error = false;
-
-        // consume digits and underscores to allow for underscores in numbers
+    
         while (isDigit(peek(self)) or peek(self) == '_') {
-            if (peek(self) == '_') {
-                // check for invalid underscore patterns
-                if (isAtStart(self) or !isDigit(self.source[self.current - 1])) {
-                    // underscore not after a digit (like _123 or at start)
-                    const msg = try std.fmt.allocPrint(
-                        self.alloc,
-                        "Invalid number: underscore must follow a digit at line {d}, col {d}",
-                        .{self.line, self.col}
-                    );
-                    try collectError(self, msg);
-                    has_error = true;
-                }
-                // check if next char is valid
-                if (!isDigit(peekNext(self)) and peekNext(self) != '.') {
-                    const msg = try std.fmt.allocPrint(
-                        self.alloc,
-                        "Invalid number: underscore must be followed by a digit at line {d}, col {d}",
-                        .{self.line, self.col}
-                    );
-                    try collectError(self, msg);
-                    has_error = true;
-                }
-            }
             advance(self);
         }
-
+    
         var is_float = false;
-
-        // check for decimal point
-        if (peek(self) == '.') {
-            if (!isAtEnd(self) and self.current + 1 < self.source.len and 
-                (isDigit(peekNext(self)) or peekNext(self) == '_')) {
-                is_float = true;
-                advance(self); // consume '.'
+        var decimal_count: usize = 0;
+    
+        while (peek(self) == '.') {
+            const has_digit_after = hasDigitAfterDot(self);
         
-                // First char after dot must be a digit, not underscore
+            if (has_digit_after) {
+                decimal_count += 1;
+                is_float = true;
+                advance(self);
+            
+                if (decimal_count > 1) {
+                    has_error = true;
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Invalid number: multiple decimal points at line {d}, col {d}",
+                        .{self.line, self.col - 1}
+                    );
+                    try collectError(self, msg);
+                }
+            
                 if (peek(self) == '_') {
+                    has_error = true;
                     const msg = try std.fmt.allocPrint(
                         self.alloc,
                         "Invalid number: underscore cannot immediately follow decimal point at line {d}, col {d}",
                         .{self.line, self.col}
                     );
                     try collectError(self, msg);
-                    has_error = true;
                 }
-        
-                // consume fractional part with underscores
+            
                 while (isDigit(peek(self)) or peek(self) == '_') {
-                    if (peek(self) == '_') {
-                        if (!isDigit(self.source[self.current - 1])) {
-                            const msg = try std.fmt.allocPrint(
-                                self.alloc,
-                                "Invalid number: underscore must follow a digit at line {d}, col {d}",
-                                .{self.line, self.col}
-                            );
-                            try collectError(self, msg);
-                            has_error = true;
-                        }
-                    }
                     advance(self);
                 }
+            } else {
+                break;
             }
         }
-
-        // check for trailing underscore
-        if (self.current > 0 and self.source[self.current - 1] == '_') {
+    
+        const lexeme = self.source[self.start..self.current];
+    
+        if (lexeme[lexeme.len - 1] == '_') {
+            has_error = true;
             const msg = try std.fmt.allocPrint(
                 self.alloc,
                 "Invalid number: trailing underscore at line {d}, col {d}",
                 .{self.line, self.col - 1}
             );
             try collectError(self, msg);
-            has_error = true;
         }
-
-        // check for invalid suffix
+    
+        var i: usize = 0;
+        while (i < lexeme.len) : (i += 1) {
+            if (lexeme[i] == '_' and i + 1 < lexeme.len and lexeme[i + 1] == '.') {
+                has_error = true;
+                const msg = try std.fmt.allocPrint(
+                    self.alloc,
+                    "Invalid number: underscore before decimal point at line {d}, col {d}",
+                    .{self.line, start_col + i}
+                );
+                try collectError(self, msg);
+            }
+        }
+    
+        var prev_was_underscore = false;
+        for (lexeme) |char| {
+            if (char == '_') {
+                if (prev_was_underscore) {
+                    has_error = true;
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Invalid number: consecutive underscores at line {d}, col {d}",
+                        .{self.line, start_col}
+                    );
+                    try collectError(self, msg);
+                    break;
+                }
+                prev_was_underscore = true;
+            } else {
+                prev_was_underscore = false;
+            }
+        }
+    
         if (isAlpha(peek(self))) {
             has_error = true;
             const suffix_start = self.current;
             while (isAlphaNumeric(peek(self))) advance(self);
-    
+        
             const invalid_suffix = self.source[suffix_start..self.current];
             const msg = try std.fmt.allocPrint(
                 self.alloc,
@@ -643,12 +651,33 @@ pub const Tokenizer = struct {
             );
             try collectError(self, msg);
         }
-
+    
         if (is_float) {
             try addToken(self, .FLOAT);
         } else {
             try addToken(self, .INTEGER);
         }
+    }
+
+    fn hasDigitAfterDot(self: *Tokenizer) bool {
+        var lookahead: usize = 1;
+    
+        while (self.current + lookahead < self.source.len) {
+            const char = self.source[self.current + lookahead];
+        
+            if (isDigit(char)) {
+                return true;
+            }
+
+            if (char == '_') {
+                lookahead += 1;
+                continue;
+            }
+
+            return false;
+        }
+    
+        return false;
     }
 
     fn peekNext(self: *Tokenizer) u8 {
@@ -705,8 +734,6 @@ fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {
 fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []const Token) !void {
     const output = try testTokenize(allocator, source);
 
-    std.debug.print("expected len: {d}\n", .{expected.len});
-    std.debug.print("output len: {d}\n", .{output.len});
     for (expected, output) |exp_token, actual| {
         try testing.expectEqual(exp_token.token_type, actual.token_type);
         try testing.expectEqualStrings(exp_token.lexeme, actual.lexeme);
@@ -780,15 +807,56 @@ test "identifiers" {
     });
 }
 
-test "character literals" {
+test "valid character literals" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     const allocator = arena.allocator();
     defer arena.deinit();
-      
-    try expectTokens(allocator, "'a' '\n'", &.{
+       
+    try expectTokens(allocator, "'a'", &.{
         .{ .token_type = .CHARACTER, .lexeme = "a", .span = null },
-        .{ .token_type = .CHARACTER, .lexeme = "\n", .span = null },
-        .{ .token_type = .EOF, .lexeme = "", .span = null }, 
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+    
+    try expectTokens(allocator, "'\\n'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\n", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+    
+    try expectTokens(allocator, "'\\t'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\t", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+    
+    try expectTokens(allocator, "'\\\\'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\\\", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+    
+    try expectTokens(allocator, "'\\''", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\'", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "character literal with hex escape" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "'\\x41'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\x41", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "character literal with unicode escape" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "'\\u0041'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\u0041", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
@@ -904,6 +972,30 @@ test "integer followed by dot and identifier" {
     });
 }
 
+test "character literal followed by other tokens" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "'a' + 'b'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "a", .span = null },
+        .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .CHARACTER, .lexeme = "b", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "underscore followed by number" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "_123", &.{
+        .{ .token_type = .IDENTIFIER, .lexeme = "_123", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
 // ====================================
 // ERROR CASES
 // ====================================
@@ -944,20 +1036,14 @@ test "number followed by identifier" {
     try expectError("163zsd", 1);
 }
 
-test "multiple characters in char literal" {
-    try expectError("'aa'", 1);
-}
-
 test "multiple decimal points in number" {
-    try expectError("1.234.567", 2);
+    try expectTokensWithErrors("1.234.567", &.{
+        .{ .token_type = .FLOAT, .lexeme = "1.234.567", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
 }
 
 test "invalid underscore patterns" {
-    try expectTokensWithErrors("_123", &.{
-        .{ .token_type = .INTEGER, .lexeme = "_123", .span = null },
-        .{ .token_type = .EOF, .lexeme = "", .span = null },
-    }, 1);
-
     try expectTokensWithErrors("123_", &.{
         .{ .token_type = .INTEGER, .lexeme = "123_", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
@@ -989,6 +1075,27 @@ test "number with invalid suffix" {
 test "float with invalid suffix" {
     try expectTokensWithErrors("3.14xyz", &.{
         .{ .token_type = .FLOAT, .lexeme = "3.14xyz", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
+
+test "invalid character literals - multiple characters" {
+    try expectTokensWithErrors("'abc'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "abc", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
+
+test "invalid character literals - empty" {
+    try expectTokensWithErrors("''", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
+
+test "invalid escape sequences in character literals" {
+    try expectTokensWithErrors("'\\q'", &.{
+        .{ .token_type = .CHARACTER, .lexeme = "\\q", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     }, 1);
 }
