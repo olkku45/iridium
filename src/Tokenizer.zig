@@ -595,7 +595,7 @@ fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {
 }
 
 fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []const Token) !void {
-    const output = testTokenize(allocator, source);
+    const output = try testTokenize(allocator, source);
 
     for (expected, output) |exp_token, actual| {
         try testing.expectEqual(exp_token.token_type, actual.token_type);
@@ -753,14 +753,18 @@ test "numbers with underscores" {
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 
-    try expectTokens("3_14.15_92", &.{
+    try expectTokens(allocator, "3_14.15_92", &.{
         .{ .token_type = .FLOAT, .lexeme = "3_14.15_92", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
 }
 
 test "number just at end of file" {
-    try expectTokens("123", &.{
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "123", &.{
         .{ .token_type = .INTEGER, .lexeme = "123", .span = null },
         .{ .token_type = .EOF, .lexeme = "", .span = null },
     });
@@ -778,7 +782,11 @@ test "valid floating point number" {
 }
 
 test "integer followed by dot and identifier" {
-    try expectTokens("123.abc", &.{
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+    
+    try expectTokens(allocator, "123.abc", &.{
         .{ .token_type = .INTEGER, .lexeme = "123", .span = null },
         .{ .token_type = .DOT, .lexeme = ".", .span = null },
         .{ .token_type = .IDENTIFIER, .lexeme = "abc", .span = null },
