@@ -743,6 +743,49 @@ test "operators without spaces" {
     });
 }
 
+test "numbers with underscores" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
+    try expectTokens(allocator, "1_000_000", &.{
+        .{ .token_type = .INTEGER, .lexeme = "1_000_000", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+
+    try expectTokens("3_14.15_92", &.{
+        .{ .token_type = .FLOAT, .lexeme = "3_14.15_92", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "number just at end of file" {
+    try expectTokens("123", &.{
+        .{ .token_type = .INTEGER, .lexeme = "123", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "valid floating point number" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
+    try expectTokens(allocator, "3.14", &.{
+        .{ .token_type = .FLOAT, .lexeme = "3.14", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "integer followed by dot and identifier" {
+    try expectTokens("123.abc", &.{
+        .{ .token_type = .INTEGER, .lexeme = "123", .span = null },
+        .{ .token_type = .DOT, .lexeme = ".", .span = null },
+        .{ .token_type = .IDENTIFIER, .lexeme = "abc", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
 // ====================================
 // ERROR CASES
 // ====================================
@@ -791,6 +834,43 @@ test "multiple decimal points in number" {
     try expectError("1.234.567", 2);
 }
 
-// ====================================
-// ERROR MESSAGES
-// ====================================
+test "invalid underscore patterns" {
+    try expectTokensWithErrors("_123", &.{
+        .{ .token_type = .INTEGER, .lexeme = "_123", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+
+    try expectTokensWithErrors("123_", &.{
+        .{ .token_type = .INTEGER, .lexeme = "123_", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+    
+    try expectTokensWithErrors("1__000", &.{
+        .{ .token_type = .INTEGER, .lexeme = "1__000", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+    
+    try expectTokensWithErrors("123_.45", &.{
+        .{ .token_type = .FLOAT, .lexeme = "123_.45", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+    
+    try expectTokensWithErrors("123._45", &.{
+        .{ .token_type = .FLOAT, .lexeme = "123._45", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
+
+test "number with invalid suffix" {
+    try expectTokensWithErrors("123abc", &.{
+        .{ .token_type = .INTEGER, .lexeme = "123abc", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
+
+test "float with invalid suffix" {
+    try expectTokensWithErrors("3.14xyz", &.{
+        .{ .token_type = .FLOAT, .lexeme = "3.14xyz", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 1);
+}
