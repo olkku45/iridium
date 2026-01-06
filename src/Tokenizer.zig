@@ -345,30 +345,138 @@ pub const Tokenizer = struct {
         }
     }
 
-    // 'a', '\n', '\''
     fn character(self: *Tokenizer) !void {
-        const start_col = self.col;
-
+        const start_line = self.line;
+        const start_col = self.col - 1; // We already consumed opening '
+    
+        var char_count: usize = 0;
+        var has_escape = false;
+    
         while (peek(self) != '\'' and !isAtEnd(self)) {
+            // check if we hit an actual newline (not escaped \n)
             if (peek(self) == '\n') {
                 const msg = try std.fmt.allocPrint(
                     self.alloc,
-                    "Unterminated character literal at line {d} col {d}",
-                    .{self.line, start_col}
+                    "Unterminated character literal at line {d}, col {d} (cannot span multiple lines)",
+                    .{start_line, start_col}
                 );
                 try collectError(self, msg);
-                return;
+                return; // don't consume the newline
             }
-            advance(self);
+        
+            // handle escape sequences
+            if (peek(self) == '\\') {
+                has_escape = true;
+                advance(self); // consume backslash
+            
+                if (isAtEnd(self)) {
+                    try collectError(self, "Unterminated character literal: unexpected end of file");
+                    return;
+                }
+            
+                const escape_char = peek(self);
+                switch (escape_char) {
+                    'n', 't', 'r', '\\', '\'', '"', '0' => {
+                        advance(self); // consume escape character
+                        char_count += 1; // this counts as one character
+                    },
+                    'x' => {
+                        // hex escape
+                        advance(self); // consume 'x'
+                    
+                        // expect 2 hex digits
+                        var hex_digits: usize = 0;
+                        while (hex_digits < 2 and isHexDigit(peek(self))) {
+                            advance(self);
+                            hex_digits += 1;
+                        }
+                    
+                        if (hex_digits != 2) {
+                            const msg = try std.fmt.allocPrint(
+                                self.alloc,
+                                "Invalid hex escape sequence: expected 2 hex digits at line {d}, col {d}",
+                                .{self.line, self.col}
+                            );
+                            try collectError(self, msg);
+                        }
+                        char_count += 1;
+                    },
+                    'u' => {
+                        // Unicode escape like '\u0041'
+                        advance(self); // consume 'u'
+                    
+                        var hex_digits: usize = 0;
+                        while (hex_digits < 4 and isHexDigit(peek(self))) {
+                            advance(self);
+                            hex_digits += 1;
+                        }
+                    
+                        if (hex_digits != 4) {
+                            const msg = try std.fmt.allocPrint(
+                                self.alloc,
+                                "Invalid unicode escape sequence: expected 4 hex digits at line {d}, col {d}",
+                                .{self.line, self.col}
+                            );
+                            try collectError(self, msg);
+                        }
+                        char_count += 1;
+                    },
+                    else => {
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "Invalid escape sequence '\\{c}' at line {d}, col {d}",
+                            .{escape_char, self.line, self.col}
+                        );
+                        try collectError(self, msg);
+                        advance(self);
+                        char_count += 1;
+                    },
+                }
+            } else {
+                // Regular character
+                advance(self);
+                char_count += 1;
+            }
         }
-
+    
         if (isAtEnd(self)) {
-            try collectError(self, "Unterminated character literal");
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Unterminated character literal starting at line {d}, col {d}",
+                .{start_line, start_col}
+            );
+            try collectError(self, msg);
             return;
         }
-
+    
+        // check for empty character literal
+        if (char_count == 0) {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Empty character literal at line {d}, col {d}",
+                .{start_line, start_col}
+            );
+            try collectError(self, msg);
+        }
+    
+        // check for multiple characters
+        if (char_count > 1) {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Character literal contains multiple characters at line {d}, col {d} (use string literal instead)",
+                .{start_line, start_col}
+            );
+            try collectError(self, msg);
+        }
+    
         advance(self);
         try addToken(self, .CHARACTER);
+    }
+
+    fn isHexDigit(char: u8) bool {
+        return (char >= '0' and char <= '9') or
+               (char >= 'a' and char <= 'f') or
+               (char >= 'A' and char <= 'F');
     }
 
     fn string(self: *Tokenizer) !void {
@@ -597,6 +705,8 @@ fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {
 fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []const Token) !void {
     const output = try testTokenize(allocator, source);
 
+    std.debug.print("expected len: {d}\n", .{expected.len});
+    std.debug.print("output len: {d}\n", .{output.len});
     for (expected, output) |exp_token, actual| {
         try testing.expectEqual(exp_token.token_type, actual.token_type);
         try testing.expectEqualStrings(exp_token.lexeme, actual.lexeme);
