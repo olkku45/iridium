@@ -441,18 +441,106 @@ pub const Tokenizer = struct {
     }
 
     fn number(self: *Tokenizer) !void {
-        while (isDigit(peek(self))) advance(self);
+        const start_col = self.col - 1;
+        var has_error = false;
 
-        if (peek(self) == '.' and isDigit(peekNext(self))) {
+        // consume digits and underscores to allow for underscores in numbers
+        while (isDigit(peek(self)) or peek(self) == '_') {
+            if (peek(self) == '_') {
+                // check for invalid underscore patterns
+                if (isAtStart(self) or !isDigit(self.source[self.current - 1])) {
+                    // underscore not after a digit (like _123 or at start)
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Invalid number: underscore must follow a digit at line {d}, col {d}",
+                        .{self.line, self.col}
+                    );
+                    try collectError(self, msg);
+                    has_error = true;
+                }
+                // check if next char is valid
+                if (!isDigit(peekNext(self)) and peekNext(self) != '.') {
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Invalid number: underscore must be followed by a digit at line {d}, col {d}",
+                        .{self.line, self.col}
+                    );
+                    try collectError(self, msg);
+                    has_error = true;
+                }
+            }
             advance(self);
-
-            while (isDigit(peek(self))) advance(self);
-
-            try addToken(self, .FLOAT);
-            return;
         }
 
-        try addToken(self, .INTEGER);
+        var is_float = false;
+
+        // check for decimal point
+        if (peek(self) == '.') {
+            if (!isAtEnd(self) and self.current + 1 < self.source.len and 
+                (isDigit(peekNext(self)) or peekNext(self) == '_')) {
+                is_float = true;
+                advance(self); // consume '.'
+        
+                // First char after dot must be a digit, not underscore
+                if (peek(self) == '_') {
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Invalid number: underscore cannot immediately follow decimal point at line {d}, col {d}",
+                        .{self.line, self.col}
+                    );
+                    try collectError(self, msg);
+                    has_error = true;
+                }
+        
+                // consume fractional part with underscores
+                while (isDigit(peek(self)) or peek(self) == '_') {
+                    if (peek(self) == '_') {
+                        if (!isDigit(self.source[self.current - 1])) {
+                            const msg = try std.fmt.allocPrint(
+                                self.alloc,
+                                "Invalid number: underscore must follow a digit at line {d}, col {d}",
+                                .{self.line, self.col}
+                            );
+                            try collectError(self, msg);
+                            has_error = true;
+                        }
+                    }
+                    advance(self);
+                }
+            }
+        }
+
+        // check for trailing underscore
+        if (self.current > 0 and self.source[self.current - 1] == '_') {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Invalid number: trailing underscore at line {d}, col {d}",
+                .{self.line, self.col - 1}
+            );
+            try collectError(self, msg);
+            has_error = true;
+        }
+
+        // check for invalid suffix
+        if (isAlpha(peek(self))) {
+            has_error = true;
+            const suffix_start = self.current;
+            while (isAlphaNumeric(peek(self))) advance(self);
+    
+            const invalid_suffix = self.source[suffix_start..self.current];
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Invalid number: unexpected suffix '{s}' at line {d}, col {d}",
+                .{invalid_suffix, self.line, start_col}
+            );
+            try collectError(self, msg);
+        }
+
+        if (is_float) {
+            try addToken(self, .FLOAT);
+        } else {
+            try addToken(self, .INTEGER);
+        }
     }
 
     fn peekNext(self: *Tokenizer) u8 {
@@ -501,6 +589,11 @@ pub const Tokenizer = struct {
 
 const testing = std.testing;
 
+fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {   
+    var tokenizer = try Tokenizer.init(allocator, source);
+    return try tokenizer.getTokens();
+}
+
 fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []const Token) !void {
     const output = testTokenize(allocator, source);
 
@@ -510,9 +603,35 @@ fn expectTokens(allocator: std.mem.Allocator, source: []const u8, expected: []co
     }
 }
 
-fn testTokenize(allocator: std.mem.Allocator, source: []const u8) ![]Token {   
+fn expectError(source: []const u8, expected_error_count: usize) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
     var tokenizer = try Tokenizer.init(allocator, source);
-    return try tokenizer.getTokens();
+    _ = try tokenizer.getTokens();
+
+    try testing.expectEqual(expected_error_count, tokenizer.errors.items.len);
+}
+
+fn expectTokensWithErrors(
+    source: []const u8,
+    expected: []const Token,
+    expected_error_count: usize,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
+    var tokenizer = try Tokenizer.init(allocator, source);
+    const output = try tokenizer.getTokens();
+
+    try testing.expectEqual(expected_error_count, tokenizer.errors.items.len);
+
+    for (expected, output) |exp_token, actual| {
+        try testing.expectEqual(exp_token.token_type, actual.token_type);
+        try testing.expectEqualStrings(exp_token.lexeme, actual.lexeme);
+    }
 }
 
 test "basic tests" {
@@ -588,20 +707,90 @@ test "keywords" {
     });
 }
 
-// ====================================
-// ERROR CASES
-// ====================================
+test "string with newline" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
 
-// '@' may be added later for built-in functions
-test "invalid character" {
+    try expectTokens(allocator, "\"hello\nworld\"", &.{
+        .{ .token_type = .STRING, .lexeme = "hello\nworld", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "empty string" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
+    try expectTokens(allocator, "\"\"", &.{
+        .{ .token_type = .STRING, .lexeme = "", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+test "operators without spaces" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     const allocator = arena.allocator();
     defer arena.deinit();
     
-    const err = testTokenize(allocator, "@");
-    try testing.expectError(error.UnexpectedCharacter, err);
+    try expectTokens(allocator, "x+*y", &.{
+        .{ .token_type = .IDENTIFIER, .lexeme = "x", .span = null },
+        .{ .token_type = .PLUS, .lexeme = "+", .span = null },
+        .{ .token_type = .STAR, .lexeme = "*", .span = null },
+        .{ .token_type = .IDENTIFIER, .lexeme = "y", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    });
+}
+
+// ====================================
+// ERROR CASES
+// ====================================
+
+// TODO test incorrect escape sequences
+
+// '@' may be added later for built-in functions
+test "invalid character" {
+    try expectError("@", 1);
+}
+
+test "unterminated string" {
+    try expectError("\"hello", 1);
+}
+
+test "unterminated character" {
+    try expectError("'a", 1);
+}
+
+test "unterminated block comment" {
+    try expectError("/* invalid", 1);
+}
+
+test "invalid character followed by valid tokens" {
+    try expectTokensWithErrors("@@@ x = 5", &.{
+        .{ .token_type = .IDENTIFIER, .lexeme = "x", .span = null },
+        .{ .token_type = .EQUAL, .lexeme = "=", .span = null },
+        .{ .token_type = .INTEGER, .lexeme = "5", .span = null },
+        .{ .token_type = .EOF, .lexeme = "", .span = null },
+    }, 3);
+}
+
+test "multiple sequential errors" {
+    try expectError("@@@ ### $$$", 9);
+}
+
+test "number followed by identifier" {
+    try expectError("163zsd", 1);
 }
 
 test "multiple characters in char literal" {
-    
+    try expectError("'aa'", 1);
 }
+
+test "multiple decimal points in number" {
+    try expectError("1.234.567", 2);
+}
+
+// ====================================
+// ERROR MESSAGES
+// ====================================
