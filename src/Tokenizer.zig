@@ -169,6 +169,17 @@ const Error = error{
     UnexpectedCharacter,
 };
 
+pub const TokenError = struct {
+    message: []const u8,
+    line: usize,
+    col: usize,
+};
+
+fn initErrors() std.ArrayList(TokenError) {
+    const errs: std.array_list.Aligned(TokenError, null) = .empty;
+    return errs;
+}
+
 pub const Tokenizer = struct {
     source: []const u8,
     start: usize,
@@ -178,6 +189,7 @@ pub const Tokenizer = struct {
     keywords: std.StaticStringMap(TokenType),
     tokens: std.ArrayList(Token),
     alloc: std.mem.Allocator,
+    errors: std.ArrayList(TokenError),
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) !Tokenizer {
         return Tokenizer{
@@ -188,6 +200,7 @@ pub const Tokenizer = struct {
             .col = 1,
             .keywords = try initKeywords(),
             .tokens = initTokens(),
+            .errors = initErrors(),
             .alloc = allocator,
         };
     }
@@ -257,7 +270,9 @@ pub const Tokenizer = struct {
             ';' => try addToken(self, .SEMICOLON),
             '/' => {
                 if (peek(self) == '*') {
+                    const start_line = self.line;
                     advance(self);
+                    
                     while (!isAtEnd(self)) {
                         if (peek(self) == '*' and peekNext(self) == '/') {
                             advance(self);
@@ -269,6 +284,15 @@ pub const Tokenizer = struct {
                             resetCol(self);
                         }
                         advance(self);
+                    }
+
+                    if (isAtEnd(self)) {
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "Unterminated block comment starting at line {d}",
+                            .{start_line}
+                        );
+                        try collectError(self, msg);
                     }
                 } else if (match(self, '/')) {
                     while (peek(self) != '\n' and !isAtEnd(self)) advance(self);
@@ -309,6 +333,12 @@ pub const Tokenizer = struct {
                 } else if (isAlphaNumeric(char)) {
                     try identifier(self);
                 } else {
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Unexpected character: '{c}'",
+                        .{char}
+                    );
+                    try collectError(self, msg);
                     return error.UnexpectedCharacter;
                 }
             },
@@ -317,17 +347,34 @@ pub const Tokenizer = struct {
 
     // 'a', '\n', '\''
     fn character(self: *Tokenizer) !void {
-        if (peek(self) == '\\') {
-            while (!isAtEnd(self) and peek(self) != '\'') advance(self);
-            if (!isAtEnd(self)) advance(self);
-        } else {
-            if (!isAtEnd(self)) advance(self);
+        const start_col = self.col;
+
+        while (peek(self) != '\'' and !isAtEnd(self)) {
+            if (peek(self) == '\n') {
+                const msg = try std.fmt.allocPrint(
+                    self.alloc,
+                    "Unterminated character literal at line {d} col {d}",
+                    .{self.line, start_col}
+                );
+                try collectError(self, msg);
+                return;
+            }
+            advance(self);
         }
 
+        if (isAtEnd(self)) {
+            try collectError(self, "Unterminated character literal");
+            return;
+        }
+
+        advance(self);
         try addToken(self, .CHARACTER);
     }
 
     fn string(self: *Tokenizer) !void {
+        const start_line = self.line;
+        const start_col = self.col;
+        
         while (peek(self) != '"' and !isAtEnd(self)) {
             if (peek(self) == '\n') {
                 self.line += 1;
@@ -336,9 +383,28 @@ pub const Tokenizer = struct {
             advance(self);
         }
 
-        advance(self);
+        if (isAtEnd(self)) {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "Unterminated string at line {d} col {d}",
+                .{start_line, start_col}
+            );
+            try collectError(self, msg);
+            try addToken(self, .STRING);
+            return;
+        }
 
+        advance(self);
         try addToken(self, .STRING);
+    }
+
+    fn expect(self: *Tokenizer, char: u8) !void {
+        if (self.source[self.current] != char) {
+            return error.UnexpectedCharacter;
+        }
+        
+        self.current += 1;
+        self.col += 1;
     }
 
     fn peek(self: *Tokenizer) u8 {
@@ -418,6 +484,14 @@ pub const Tokenizer = struct {
 
         advance(self);
         return true;
+    }
+
+    fn collectError(self: *Tokenizer, message: []const u8) !void {
+        try self.errors.append(self.alloc, TokenError{
+            .message = message,
+            .line = self.line,
+            .col = self.col,
+        });
     }
 };
 
@@ -520,7 +594,7 @@ test "keywords" {
 
 // '@' may be added later for built-in functions
 test "invalid character" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
     const allocator = arena.allocator();
     defer arena.deinit();
     
